@@ -169,6 +169,14 @@ function renderMilestoneProgress(assetStages) {
   `;
 }
 
+// Add this to js/index.js if you want a dummy function for now
+function getSelectedUnitIds() {
+  // Return an array of charger IDs you want to "select"
+  // For now, just return all IDs as a test
+  return (window.inventory || []).map(u => u.chargerId);
+}
+
+
 function renderDepreciationSummary(publicDepreciationRows) {
   const totalOriginal = publicDepreciationRows.reduce((sum, row) => sum + Number(row.originalValue), 0);
   const totalCurrent = publicDepreciationRows.reduce((sum, row) => sum + Number(row.currentValue), 0);
