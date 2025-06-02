@@ -1,6 +1,6 @@
-import { loadProducts } from './products.js';
-import { loadInventory } from './inventory.js';
-import { updateUnitsLocation } from './inventory.js';
+import { loadProducts } from '/js/products.js';
+import { loadInventory } from '/js/inventory.js';
+import { updateUnitsLocation } from '/js/inventory.js';
 
 const products = loadProducts();
 const inventory = loadInventory();
