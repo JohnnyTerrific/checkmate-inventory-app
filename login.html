@@ -67,14 +67,18 @@
       const password = document.getElementById('loginPassword').value;
       const errorDiv = document.getElementById('loginError');
       if (username === EMERGENCY_USER && password === EMERGENCY_PASS) {
-        // Set a mock session for the emergency user
-        // Using 'SuperAdmin' role for full access during testing. Adjust if needed.
-        const mockUser = { username: EMERGENCY_USER, role: 'SuperAdmin' }; 
-        localStorage.setItem(SESSION_KEY, JSON.stringify(mockUser));
-        window.location.replace("/index.html");
-      } else {
-        errorDiv.textContent = "Invalid username or password.";
-      }
+  // Set a mock session for the emergency user
+  const mockUser = { username: EMERGENCY_USER, role: 'SuperAdmin' }; 
+  localStorage.setItem(SESSION_KEY, JSON.stringify(mockUser));
+  // Redirect: mobile goes to inventory, desktop goes to index
+  if (window.innerWidth <= 768) {
+    window.location.replace("/pages/inventory.html");
+  } else {
+    window.location.replace("/index.html");
+  }
+} else {
+  errorDiv.textContent = "Invalid username or password.";
+}
     };
   </script>
 </body>
