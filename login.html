@@ -62,24 +62,22 @@
     };
 
     document.getElementById('loginForm').onsubmit = function(e) {
-      e.preventDefault();
-      const username = document.getElementById('loginUsername').value.trim();
-      const password = document.getElementById('loginPassword').value;
-      const errorDiv = document.getElementById('loginError');
-      if (username === EMERGENCY_USER && password === EMERGENCY_PASS) {
-  // Set a mock session for the emergency user
-  const mockUser = { username: EMERGENCY_USER, role: 'SuperAdmin' }; 
-  localStorage.setItem(SESSION_KEY, JSON.stringify(mockUser));
-  // Redirect: mobile goes to inventory, desktop goes to index
-  if (window.innerWidth <= 768) {
-    window.location.replace("/pages/inventory.html");
+  e.preventDefault();
+  const username = document.getElementById('loginUsername')?.value.trim();
+  const password = document.getElementById('loginPassword')?.value;
+  const errorDiv = document.getElementById('loginError');
+  if (username === EMERGENCY_USER && password === EMERGENCY_PASS) {
+    const mockUser = { username: EMERGENCY_USER, role: 'SuperAdmin' }; 
+    localStorage.setItem(SESSION_KEY, JSON.stringify(mockUser));
+    if (window.innerWidth <= 768) {
+      window.location.replace("/pages/inventory.html");
+    } else {
+      window.location.replace("/index.html");
+    }
   } else {
-    window.location.replace("/index.html");
+    errorDiv.textContent = "Invalid username or password.";
   }
-} else {
-  errorDiv.textContent = "Invalid username or password.";
-}
-    };
+};
   </script>
 </body>
 </html>
