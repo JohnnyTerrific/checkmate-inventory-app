@@ -1,6 +1,6 @@
-import { shellHTML } from '/pages/partials/shell.js';
-import { getCurrentUser, login, logout, addUser, loadUsers } from '/utils/users.js';
-import { can, getPermissions } from '/utils/permissions.js';
+import { shellHTML } from './pages/partials/shell.js';
+import { getCurrentUser, login, logout, addUser, loadUsers } from './utils/users.js';
+import { can, getPermissions } from './utils/permissions.js';
 window.getCurrentUser = getCurrentUser;
 
 
