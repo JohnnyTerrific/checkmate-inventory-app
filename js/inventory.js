@@ -1973,23 +1973,24 @@ window.openBarcodeScanner = function(onDetected) {
 
   let scanned = false;
 
+  function cleanup() {
+    try { Quagga.offDetected && Quagga.offDetected(); } catch (e) {}
+    try { Quagga.stop(); } catch (e) {}
+  }
+
   function closeScanner() {
-    try { 
-      try { Quagga.offDetected && Quagga.offDetected(); } catch (e) {}
-      try { Quagga.stop(); } catch (e) {} 
-    } catch (e) {}
+    cleanup();
     scanDialog.close();
   }
 
   function cancelScanHandler() {
     scanned = true;
-    // Remove Quagga event listeners before stopping
-    try { Quagga.offDetected && Quagga.offDetected(); } catch (e) {}
-    try { Quagga.stop(); } catch (e) {}
+    cleanup();
     scanDialog.close();
     if (onDetected) onDetected(null);
   }
-  // Make sure the button is available before binding
+
+  // Bind cancel button after DOM is ready
   setTimeout(() => {
     const cancelBtn = document.getElementById('cancelScanBtn');
     if (cancelBtn) {
@@ -2010,6 +2011,8 @@ window.openBarcodeScanner = function(onDetected) {
     }, function(err) {
       if (err) {
         document.getElementById('barcode-feedback').textContent = "Camera error: " + err;
+        // Allow closing even if camera fails
+        setTimeout(closeScanner, 1500);
         return;
       }
       Quagga.start();
@@ -2042,8 +2045,8 @@ window.openBarcodeScanner = function(onDetected) {
         }, 600);
       }
     });
-  }, 150); // <-- This closes the setTimeout
-}; // <-- This closes window.openBarcodeScanner
+  }, 150);
+};
 
 
 
