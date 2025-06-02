@@ -71,7 +71,7 @@
         // Using 'SuperAdmin' role for full access during testing. Adjust if needed.
         const mockUser = { username: EMERGENCY_USER, role: 'SuperAdmin' }; 
         localStorage.setItem(SESSION_KEY, JSON.stringify(mockUser));
-        window.location.replace("index.html");
+        window.location.replace("/index.html");
       } else {
         errorDiv.textContent = "Invalid username or password.";
       }
