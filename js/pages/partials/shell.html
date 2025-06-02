@@ -16,7 +16,7 @@ export const shellHTML = `
 </div>
 <nav class="flex-1 px-2 space-y-1">
   <!-- Home -->
-  <a href="index.html"
+  <a href="pages/index.html"
      class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
      data-page="home">
     <!-- heroicon: home -->
@@ -31,7 +31,7 @@ export const shellHTML = `
   </a>
 
   <!-- Dashboard -->
-  <a href="dashboard.html"
+  <a href="pages/dashboard.html"
      class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
      data-page="dashboard">
     <!-- heroicon: view-dashboard -->
@@ -48,7 +48,7 @@ export const shellHTML = `
   </a>
 
   <!-- Inventory -->
-  <a href="inventory.html"
+  <a href="pages/inventory.html"
      class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
      data-page="inventory">
     <!-- heroicon: clipboard-list -->
@@ -65,7 +65,7 @@ export const shellHTML = `
   </a>
 
   <!-- Products -->
-  <a href="products.html"
+  <a href="pages/products.html"
      class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
      data-page="products">
     <!-- heroicon: cube -->
@@ -82,7 +82,7 @@ export const shellHTML = `
   </a>
 
   <!-- Settings -->
-  <a href="settings.html"
+  <a href="pages/settings.html"
      class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
      data-page="settings">
     <!-- heroicon: cog -->
@@ -99,7 +99,7 @@ export const shellHTML = `
   </a>
 
   <!-- Audit Log -->
-<a href="/pages/audit.html"
+<a href="pages/audit.html"
    class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
    data-page="audit">
   <!-- heroicon: Magnifying Glass (modern, beautiful) -->
@@ -123,7 +123,7 @@ export const shellHTML = `
   <!-- Logo (clickable) -->
   <img
     id="mainLogoImg"
-    src="../assets/img/CheckMate-app-logo-light.png"
+    src="assets/img/CheckMate-app-logo-light.png"
     alt="CheckMate"
     class="h-12 w-auto cursor-pointer"
     style="object-fit:contain; display:block;"
@@ -180,8 +180,26 @@ export const shellHTML = `
         <path stroke-linecap="round" stroke-linejoin="round" d="M5.121 17.804A13.937 13.937 0 0112 15c2.486 0 4.813.663 6.879 1.804M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
       </svg>
     </span>
-      <button id="manageUsersBtn" class="bg-purple-500 text-white rounded px-4 py-2 ml-2 hidden">Manage Users</button>
-<button id="logoutBtn" class="text-xs px-2 py-1 bg-gray-300 rounded ml-2">Logout</button>
+      <button id="manageUsersBtn" class="exit-btn bg-purple-500" title="Manage Users">
+  <span class="icon">
+    <!-- Optional: Add a user icon SVG here -->
+    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <circle cx="12" cy="8" r="4"/>
+      <path d="M4 20c0-4 8-4 8-4s8 0 8 4"/>
+    </svg>
+  </span>
+  <span class="hidden sm:inline">Manage Users</span>
+</button>
+<button id="logoutBtn" class="exit-btn" title="Logout">
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+    <rect x="6" y="3" width="9" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
+    <circle cx="8.5" cy="12" r="1" fill="currentColor"/>
+    <path d="M21 12h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    <path d="M18 9l3 3-3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <span class="hidden sm:inline">Logout</span>
+</button>
+</button>
   </div>
 </header>
 

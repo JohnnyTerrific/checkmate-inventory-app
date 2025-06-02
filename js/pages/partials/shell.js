@@ -16,7 +16,7 @@ export const shellHTML = `
 </div>
 <nav class="flex-1 px-2 space-y-1">
   <!-- Home -->
-  <a href="index.html"
+  <a href="pages/index.html"
      class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
      data-page="home">
     <!-- heroicon: home -->
@@ -31,7 +31,7 @@ export const shellHTML = `
   </a>
 
   <!-- Dashboard -->
-  <a href="dashboard.html"
+  <a href="pages/dashboard.html"
      class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
      data-page="dashboard">
     <!-- heroicon: view-dashboard -->
@@ -48,7 +48,7 @@ export const shellHTML = `
   </a>
 
   <!-- Inventory -->
-  <a href="inventory.html"
+  <a href="pages/inventory.html"
      class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
      data-page="inventory">
     <!-- heroicon: clipboard-list -->
@@ -65,7 +65,7 @@ export const shellHTML = `
   </a>
 
   <!-- Products -->
-  <a href="products.html"
+  <a href="pages/products.html"
      class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
      data-page="products">
     <!-- heroicon: cube -->
@@ -82,7 +82,7 @@ export const shellHTML = `
   </a>
 
   <!-- Settings -->
-  <a href="settings.html"
+  <a href="pages/settings.html"
      class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
      data-page="settings">
     <!-- heroicon: cog -->
@@ -99,7 +99,7 @@ export const shellHTML = `
   </a>
 
   <!-- Audit Log -->
-<a href="audit.html"
+<a href="pages/audit.html"
    class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
    data-page="audit">
   <!-- heroicon: Magnifying Glass (modern, beautiful) -->
@@ -123,7 +123,7 @@ export const shellHTML = `
   <!-- Logo (clickable) -->
   <img
     id="mainLogoImg"
-    src="../assets/img/CheckMate-app-logo-light.png"
+    src="assets/img/CheckMate-app-logo-light.png"
     alt="CheckMate"
     class="h-12 w-auto cursor-pointer"
     style="object-fit:contain; display:block;"

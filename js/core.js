@@ -295,7 +295,7 @@ function restrictMobileAgentUI() {
 function initApp() {
   const user = getCurrentUser();
   if (!user) {
-    window.location.replace("../login.html"); // <-- Make sure this is just "login.html"
+    window.location.replace("login.html"); // <-- Make sure this is just "login.html"
     return;
   }
   renderUIForRole(user.role);
@@ -367,7 +367,7 @@ function setupDarkModeToggle() {
       // Set dark logo
       const mainLogoImg = document.getElementById('mainLogoImg');
       if (mainLogoImg) {
-        mainLogoImg.src = '../assets/img/CheckMate-app-logo-dark.png';
+        mainLogoImg.src = 'assets/img/CheckMate-app-logo-dark.png';
       }
     } else {
       html.classList.remove('dark');
@@ -377,7 +377,7 @@ function setupDarkModeToggle() {
       // Set light logo
       const mainLogoImg = document.getElementById('mainLogoImg');
       if (mainLogoImg) {
-        mainLogoImg.src = '../assets/img/CheckMate-app-logo-light.png';
+        mainLogoImg.src = 'assets/img/CheckMate-app-logo-light.png';
       }
     }
   }
@@ -469,7 +469,7 @@ function setupSidebarToggle() {
 document.addEventListener('DOMContentLoaded', async () => {
   initApp();
   if (!getCurrentUser()) {
-    window.location.replace("../login.html");
+    window.location.replace("login.html");
     return;
   }
 
@@ -487,7 +487,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     logoutBtn.onclick = function() {
       console.log("Logout clicked");
       logout();
-      window.location.replace("../login.html");
+      window.location.replace("login.html");
     };
   }
 
