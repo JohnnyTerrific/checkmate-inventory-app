@@ -1,6 +1,6 @@
 // js/audit.js
 
-import { loadAuditLog, getCurrentUser } from './inventory.js'; // Make sure these are exported
+import { loadAuditLog, getCurrentUser } from '/js/inventory.js'; // Make sure these are exported
 
 document.addEventListener('DOMContentLoaded', () => {
   renderAuditLog();
