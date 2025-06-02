@@ -1,1 +1,0 @@
-# checkmate-inventory-app
