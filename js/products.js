@@ -398,4 +398,3 @@ export async function vendorInUse(vendorName) {
   const prods = await loadProducts();
   return prods.filter(p => p.vendor === vendorName).map(p => p.name);
 }
-export { loadProducts };

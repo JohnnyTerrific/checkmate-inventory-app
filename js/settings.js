@@ -1,5 +1,6 @@
 // --- Data service abstraction ---
 import { showToast } from '../js/core.js';
+import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
 
 const firebaseConfig = {
