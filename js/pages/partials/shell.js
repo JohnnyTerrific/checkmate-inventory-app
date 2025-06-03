@@ -175,11 +175,6 @@ export const shellHTML = `
     </div>
 
     <!-- User / Admin Info -->
-    <span class="inline-flex items-center gap-2 font-medium text-gray-600 dark:text-gray-300 select-none">
-      <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M5.121 17.804A13.937 13.937 0 0112 15c2.486 0 4.813.663 6.879 1.804M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
-      </svg>
-    </span>
       <button id="manageUsersBtn" class="exit-btn bg-purple-500" title="Manage Users">
   <span class="icon">
     <!-- Optional: Add a user icon SVG here -->

@@ -1960,13 +1960,11 @@ window.openBarcodeScanner = function(onDetected) {
     document.body.appendChild(scanDialog);
   }
   scanDialog.innerHTML = `
-    <div>
+    <div style="position:relative;">
+      <button id="cancelScanBtn" style="position:absolute;top:8px;right:8px;z-index:2;" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
       <div class="mb-2 font-bold text-lg text-blue-800 dark:text-blue-300">Scan Product Barcode</div>
       <div id="barcode-scan-video" style="width:350px;height:200px;max-width:100%;border:2px solid #9cf;border-radius:10px;"></div>
       <div id="barcode-feedback" class="mt-2 text-gray-700 dark:text-gray-200"></div>
-      <div class="flex justify-end gap-2 mt-3">
-        <button id="cancelScanBtn" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
-      </div>
     </div>
   `;
   scanDialog.showModal();
@@ -1990,13 +1988,20 @@ window.openBarcodeScanner = function(onDetected) {
     if (onDetected) onDetected(null);
   }
 
-  // Bind cancel button after DOM is ready
+  // Cancel button
   setTimeout(() => {
     const cancelBtn = document.getElementById('cancelScanBtn');
     if (cancelBtn) {
       cancelBtn.onclick = cancelScanHandler;
     }
   }, 10);
+
+  // Click outside dialog to close
+  scanDialog.addEventListener('click', function(e) {
+    if (e.target === scanDialog) {
+      cancelScanHandler();
+    }
+  });
 
   // Give DOM time to render before initializing Quagga
   setTimeout(() => {
@@ -2011,7 +2016,6 @@ window.openBarcodeScanner = function(onDetected) {
     }, function(err) {
       if (err) {
         document.getElementById('barcode-feedback').textContent = "Camera error: " + err;
-        // Allow closing even if camera fails
         setTimeout(closeScanner, 1500);
         return;
       }
@@ -2019,20 +2023,16 @@ window.openBarcodeScanner = function(onDetected) {
     });
 
     let lastResults = [];
-    let requiredStableReads = 3; // Require 3 identical reads in a row
+    let requiredStableReads = 3;
 
     Quagga.onDetected(function(data) {
       if (scanned) return;
       const code = data.codeResult.code || "";
-      // Extract last 8 digits as before:
       const numeric = (code.match(/(\d{8})$/) || [])[1] || code;
 
       lastResults.push(numeric);
-
-      // Keep only last 3 results
       if (lastResults.length > requiredStableReads) lastResults.shift();
 
-      // If all last 3 reads are the same, accept it
       if (
         lastResults.length === requiredStableReads &&
         lastResults.every(val => val === lastResults[0])
@@ -2047,8 +2047,6 @@ window.openBarcodeScanner = function(onDetected) {
     });
   }, 150);
 };
-
-
 
 window.openBulkAddDialog = openBulkAddDialog;
 window.openDetailsDialog = openDetailsDialog;

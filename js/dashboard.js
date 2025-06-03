@@ -1,6 +1,6 @@
 import { loadInventory } from "../js/inventory.js";
 import { getDashboardStats } from "../js/settings.js";
-import { updateUnitsLocation } from './inventory.js';
+import { loadSettings } from "../js/settings.js";
 
 // 1. Stat Cards Data Aggregation
  function injectDashboardPage() {
@@ -385,6 +385,8 @@ function renderShipmentCountdown(nextTs) {
 }
 
 // ③ Lists overdue assignments
+import { loadSettings } from "../js/settings.js"; // Add this import at the top
+
 function renderAgingAlerts(stats, inventory) {
   const list = document.getElementById('agingList');
   if (stats.overdueCount === 0) {
@@ -392,11 +394,23 @@ function renderAgingAlerts(stats, inventory) {
   }
   const now = Date.now();
   const threshold = 14 * 24 * 60 * 60 * 1000;
-  const overdueItems = inventory
-    .filter(i => i.assignedDate && (now - new Date(i.assignedDate).getTime()) > threshold);
-  list.innerHTML = overdueItems
-    .map(i => `<li>Charger ${i.chargerId} assigned on ${new Date(i.assignedDate).toLocaleDateString()}</li>`)
-    .join('');
+
+  // Get contractor names from settings
+  const settings = loadSettings();
+  const contractorNames = (settings.contractors || []).map(c => c.name);
+
+  // Only show overdue items assigned to a contractor
+  const overdueItems = inventory.filter(i =>
+    i.assignedDate &&
+    (now - new Date(i.assignedDate).getTime()) > threshold &&
+    contractorNames.includes(i.location)
+  );
+
+  list.innerHTML = overdueItems.length
+    ? overdueItems
+        .map(i => `<li>Charger ${i.chargerId} assigned on ${new Date(i.assignedDate).toLocaleDateString()}</li>`)
+        .join('')
+    : '<li>No overdue items</li>';
 }
   
 function renderLocationBar(locStats, inventory) {
