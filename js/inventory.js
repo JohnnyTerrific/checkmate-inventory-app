@@ -1733,8 +1733,12 @@ window.toggleActionsMenu = function(idx) {
         const chargerId = btn.dataset.chargerid;
         const unit = inventory.find(i => i.chargerId === chargerId);
         if (unit) {
-          window.openDetailsDialog(unit);
-          document.getElementById('globalSearchDialog').close();
+          if (typeof window.openDetailsDialog === "function") {
+            window.openDetailsDialog(unit);
+            document.getElementById('globalSearchDialog').close();
+          } else {
+            showToast('Details dialog not available on this page', 'red');
+          }
         } else {
           showToast('Inventory unit not found', 'red');
         }
