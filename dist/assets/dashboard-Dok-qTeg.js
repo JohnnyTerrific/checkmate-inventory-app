@@ -1,4 +1,4 @@
-import{l as m,g as x,a as v}from"./style-CEtwapeG.js";import"./shipments-D2kKzMEG.js";function w(){document.getElementById("main-content").innerHTML=`
+import"./modulepreload-polyfill-B5Qt9EMX.js";import{l as m,g as x,a as v}from"./style-BZo5ew0Z.js";import"./shipments-g2bNCKdo.js";function w(){document.getElementById("main-content").innerHTML=`
      <section class="max-w-7xl mx-auto px-4 py-6 space-y-8">
        <header class="flex items-center justify-between">
          <h1 class="text-3xl font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
