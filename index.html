@@ -7,6 +7,14 @@
   <!-- Tailwind CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Firebase App (Core) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-app-compat.js"></script>
+  <!-- Firebase Auth -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-auth-compat.js"></script>
+  <!-- Firestore Database -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore-compat.js"></script>
+
   <script type="module" src="/js/index.js"></script>
   <script>
     tailwind.config = {
@@ -18,6 +26,24 @@
   <style>
     body { visibility: hidden; }
   </style>
+
+<<script>
+  // Your Firebase configuration from the Firebase Console
+  const firebaseConfig = {
+    apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMjlJ5Uo",
+    authDomain: "checkmate-enova.firebaseapp.com",
+    projectId: "checkmate-enova",
+    storageBucket: "checkmate-enova.appspot.com",
+    messagingSenderId: "103678023284",
+    appId: "1:103678023284:web:689229ef07859db22e77e1"
+  };
+
+  // Initialize Firebase
+  firebase.initializeApp(firebaseConfig);
+  window.db = firebase.firestore();
+  window.auth = firebase.auth();
+</script>
+
 </head>
 <body data-page="home">
   <section id="index-main" class="max-w-7xl mx-auto px-4 py-4 space-y-2">
