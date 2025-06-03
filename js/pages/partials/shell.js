@@ -31,7 +31,7 @@ export const shellHTML = `
   </a>
 
   <!-- Dashboard -->
-  <a href="/pages/dashboard.html"
+  <a href="/dashboard.html"
      class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
      data-page="dashboard">
     <!-- heroicon: view-dashboard -->
@@ -48,7 +48,7 @@ export const shellHTML = `
   </a>
 
   <!-- Inventory -->
-  <a href="/pages/inventory.html"
+  <a href="/inventory.html"
      class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
      data-page="inventory">
     <!-- heroicon: clipboard-list -->
@@ -65,7 +65,7 @@ export const shellHTML = `
   </a>
 
   <!-- Products -->
-  <a href="/pages/products.html"
+  <a href="/products.html"
      class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
      data-page="products">
     <!-- heroicon: cube -->
@@ -82,7 +82,7 @@ export const shellHTML = `
   </a>
 
   <!-- Settings -->
-  <a href="/pages/settings.html"
+  <a href="/settings.html"
      class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
      data-page="settings">
     <!-- heroicon: cog -->
@@ -99,7 +99,7 @@ export const shellHTML = `
   </a>
 
   <!-- Audit Log -->
-<a href="/pages/audit.html"
+<a href="/audit.html"
    class="nav-link flex items-center px-2 py-2 rounded hover:bg-purple-50 dark:hover:bg-gray-700 font-medium dark:text-gray-200"
    data-page="audit">
   <!-- heroicon: Magnifying Glass (modern, beautiful) -->
@@ -123,7 +123,7 @@ export const shellHTML = `
   <!-- Logo (clickable) -->
   <img
     id="mainLogoImg"
-    src="/assets/img/CheckMate-app-logo-light.png"
+    src="/img/CheckMate-app-logo-light.png"
     alt="CheckMate"
     class="h-12 w-auto cursor-pointer"
     style="object-fit:contain; display:block;"

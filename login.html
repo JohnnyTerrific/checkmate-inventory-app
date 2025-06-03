@@ -70,7 +70,7 @@
     const mockUser = { username: EMERGENCY_USER, role: 'SuperAdmin' }; 
     localStorage.setItem(SESSION_KEY, JSON.stringify(mockUser));
     if (window.innerWidth <= 768) {
-      window.location.replace("/pages/inventory.html");
+      window.location.replace("/inventory.html");
     } else {
       window.location.replace("/index.html");
     }

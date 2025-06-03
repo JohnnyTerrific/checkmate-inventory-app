@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CheckMate Inventory Management</title>
+  <link rel="shortcut icon" href="/assets/img/logo-mini.png">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script> tailwind.config = { darkMode: 'class' } </script>
+
+  <!-- Third-party libs -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+
+  <!-- Hide until JS is ready -->
+  <style> body { visibility: hidden; } </style>
+
+  <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body data-page="inventory">
+  <div class="flex gap-2 mb-4">
+    <button id="floatingBackBtn" class="fixed top-24 left-8 z-40 px-4 py-2 bg-gray-200 dark:bg-gray-800 rounded-xl shadow-lg hidden transition hover:bg-gray-300 dark:hover:bg-gray-700 flex items-center gap-2">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+      </svg>
+      <span id="floatingBackLabel">Back</span>
+    </button>
+    <button id="downloadCSV"   class="bg-gray-300   text-black px-4 py-2 rounded font-semibold">Export CSV</button>
+    <button id="downloadExcel" class="bg-gray-300   text-black px-4 py-2 rounded font-semibold">Export Excel</button>
+  </div>
+
+  <div id="main-content" class="overflow-x-hidden w-full">
+
+  <!-- core utilities -->
+  <script type="module" src="/js/core.js"></script>
+  <!-- other feature modules -->
+  <script type="module" src="/js/shipments.js"></script>
+  <!-- inventory-specific logic -->
+  <script type="module" src="/js/inventory.js"></script>
+</body>
+</html>

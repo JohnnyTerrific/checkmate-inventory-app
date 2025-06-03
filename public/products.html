@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CheckMate Inventory Management</title>
+  <link rel="shortcut icon" type="image/png" href="/assets/img/logo-mini.png">
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode: 'class' }
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/assets/css/style.css">
+  <style>
+    body { visibility: hidden; }
+  </style>
+</head>
+<body data-page="products" class="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+    <section class="p-6">
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-bold">Products</h2>
+        <button id="addProductBtn" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded transition">Add Product</button>
+      </div>
+<!-- Products Grid -->
+<div class="products-scroll-area overflow-x-auto" style="max-height:70vh;">
+    <div id="productsGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"></div>
+  </div>
+  <div id="pagination" class="flex justify-center items-center gap-4 py-4 mt-2"></div>
+      <!-- Dialogs -->
+      <dialog id="productDialog" class="rounded-xl p-4"></dialog>
+      <dialog id="confirmProductDialog" class="rounded-xl p-4"></dialog>
+    </section>
+    <script type="module" src="/js/core.js"></script>
+    <script type="module" src="/js/inventory.js"></script>
+  </body>
+  </html>

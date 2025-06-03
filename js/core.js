@@ -287,7 +287,7 @@ function restrictMobileAgentUI() {
     });
     // Optional: redirect if on other page
     if (!document.body.dataset.page || document.body.dataset.page !== 'inventory') {
-      window.location.href = '/pages/inventory.html';
+      window.location.href = '/inventory.html';
     }
   }
 }
@@ -367,7 +367,7 @@ function setupDarkModeToggle() {
       // Set dark logo
       const mainLogoImg = document.getElementById('mainLogoImg');
       if (mainLogoImg) {
-        mainLogoImg.src = '/assets/img/CheckMate-app-logo-dark.png';
+        mainLogoImg.src = '/img/CheckMate-app-logo-dark.png';
       }
     } else {
       html.classList.remove('dark');
@@ -377,7 +377,7 @@ function setupDarkModeToggle() {
       // Set light logo
       const mainLogoImg = document.getElementById('mainLogoImg');
       if (mainLogoImg) {
-        mainLogoImg.src = '/assets/img/CheckMate-app-logo-light.png';
+        mainLogoImg.src = '/img/CheckMate-app-logo-light.png';
       }
     }
   }
@@ -700,7 +700,7 @@ resultsDiv.querySelectorAll('.move-btn').forEach(btn => {
           action: 'move',
           unit
         }));
-        window.location.href = '/pages/inventory.html';
+        window.location.href = '/inventory.html';
       }
       document.getElementById('globalSearchDialog').close();
     } else {
@@ -725,7 +725,7 @@ resultsDiv.querySelectorAll('.edit-inventory-btn').forEach(btn => {
           action: 'edit',
           unit
         }));
-        window.location.href = '/pages/inventory.html';
+        window.location.href = '/inventory.html';
       }
       document.getElementById('globalSearchDialog').close();
     } else {
@@ -749,7 +749,7 @@ resultsDiv.querySelectorAll('.view-inventory-btn').forEach(btn => {
           action: 'view',
           unit
         }));
-        window.location.href = '/pages/inventory.html';
+        window.location.href = '/inventory.html';
       }
       document.getElementById('globalSearchDialog').close();
     } else {

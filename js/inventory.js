@@ -138,12 +138,12 @@ window.openBulkAddDialog = function() {
         </div>
         <label>Default Location:
           <select id="bulkLocation" class="border px-2 py-1 rounded w-full">
-            ${settings.locations.map(loc => `<option value="${loc.name}" ${loc.name === 'Back Warehouse' ? 'selected' : ''}>${loc.name}</option>`).join("")}
+          ${(settings.locations || []).map(loc => `<option value="${loc.name}" ${loc.name === 'Back Warehouse' ? 'selected' : ''}>${loc.name}</option>`).join("")}
           </select>
         </label>
         <label>Default Status:
           <select id="bulkStatus" class="border px-2 py-1 rounded w-full">
-            ${settings.statuses.map(s => `<option value="${s}" ${s === 'In Stock' ? 'selected' : ''}>${s}</option>`).join("")}
+          ${(settings.statuses || []).map(s => `<option value="${s}" ${s === 'In Stock' ? 'selected' : ''}>${s}</option>`).join("")}
           </select>
         </label>
         <textarea id="bulkText" rows="7" class="border px-2 py-1 rounded w-full" placeholder="Paste here"></textarea>
@@ -997,10 +997,10 @@ dialog.innerHTML = `
   
     const dialog = document.getElementById('actionDialog');
     // Only show statuses not currently assigned to all selected
-    const statuses = loadSettings().statuses;
+    const statuses = (loadSettings().statuses || []);
     let statusOptions = statuses
-      .filter(s => !selected.every(i => i.status === s))
-      .map(s => `<option value="${s}">${s}</option>`).join("");
+    .filter(s => !selected.every(i => i.status === s))
+    .map(s => `<option value="${s}">${s}</option>`).join("");
   
     dialog.innerHTML = `
       <form method="dialog" class="flex flex-col gap-3 w-80">
@@ -1009,7 +1009,7 @@ dialog.innerHTML = `
         <label>Set status to:</label>
         <select id="newStatus" required class="border px-2 py-1 rounded">
           <option value="">-- Select Status --</option>
-          ${statuses.map(s => `<option value="${s}">${s}</option>`).join("")}
+          ${(statuses || []).map(s => `<option value="${s}">${s}</option>`).join("")}
         </select>
         <div id="privatePublicSection" style="display:none">
           <label class="font-bold">Installed as:</label>
@@ -1425,7 +1425,7 @@ window.toggleActionsMenu = function(idx) {
         <div class="text-red-600 text-xs min-h-[1em]" id="formError"></div>
         <select id="contractor" required class="border px-2 py-1 rounded">
           <option value="">-- Select Contractor --</option>
-          ${contractors.map(c => `<option value="${c.id}">${c.name} (${c.company})</option>`).join('')}
+          ${(contractors || []).map(c => `<option value="${c.id}">${c.name} (${c.company})</option>`).join('')}
         </select>
         <textarea id="assignComment" placeholder="Comment (optional)" class="border px-2 py-1 rounded"></textarea>
         <div class="flex justify-between gap-2 mt-3">
@@ -1536,7 +1536,7 @@ window.toggleActionsMenu = function(idx) {
 </select>
         <select id="editStatus" required class="border px-2 py-1 rounded">
           <option value="">-- Select Status --</option>
-          ${statusOptions.map(s => `<option value="${s}"${unit.status === s ? " selected" : ""}>${s}</option>`).join("")}
+          ${(statusOptions || []).map(s => `<option value="${s}"${unit.status === s ? " selected" : ""}>${s}</option>`).join("")}
         </select>
         <textarea id="editNotes" class="border px-2 py-1 rounded" placeholder="Notes (optional)">${unit.notes || ''}</textarea>
         <div class="flex justify-between gap-2 mt-3">
@@ -1770,16 +1770,16 @@ window.toggleActionsMenu = function(idx) {
         <input id="simNumber" type="text" placeholder="SIM Number (Optional)" class="border px-2 py-1 rounded">
         <select id="product" required class="border px-2 py-1 rounded">
           <option value="">-- Select Product --</option>
-          ${products.map(p => `<option value="${p}">${p}</option>`).join("")}
+          ${(products || []).map(p => `<option value="${p}">${p}</option>`).join("")}
         </select>
         <input id="model" type="text" placeholder="Model (Optional)" class="border px-2 py-1 rounded">
         <select id="location" required class="border px-2 py-1 rounded">
           <option value="">-- Select Location --</option>
-          ${locations.map(l => `<option value="${l.name}">${l.name}${l.parent ? ` (${l.parent})` : ""}</option>`).join("")}
+          ${(locations || []).map(l => `<option value="${l.name}">${l.name}${l.parent ? ` (${l.parent})` : ""}</option>`).join("")}
         </select>
         <select id="status" required class="border px-2 py-1 rounded">
           <option value="">-- Select Status --</option>
-          ${statusOptions.map(s => `<option value="${s}">${s}</option>`).join("")}
+          ${(statusOptions || []).map(s => `<option value="${s}">${s}</option>`).join("")}
         </select>
         <textarea id="notes" placeholder="Notes (Optional)" class="border px-2 py-1 rounded"></textarea>
         <div id="privatePublicSection" style="display:none">
@@ -1901,7 +1901,7 @@ window.openStatusDialog = function(unit) {
       <label>New status:</label>
       <select id="newStatus" required class="border px-2 py-1 rounded">
         <option value="">-- Select Status --</option>
-        ${statusOptions.map(s => `<option value="${s}"${unit.status === s ? " selected" : ""}>${s}</option>`).join("")}
+        ${(statusOptions || []).map(s => `<option value="${s}"${unit.status === s ? " selected" : ""}>${s}</option>`).join("")}
       </select>
       <textarea id="statusComment" placeholder="Comment (optional)" class="border px-2 py-1 rounded"></textarea>
       <div class="flex justify-between gap-2 mt-3">

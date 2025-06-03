@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CheckMate Inventory Management</title>
+  <link rel="shortcut icon" type="image/png" href="/assets/img/logo-mini.png">
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode: 'class' }
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/assets/css/style.css">
+  <style>
+    body { visibility: hidden; }
+  </style>
+</head>
+<body data-page="settings" class="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+    <section class="p-6">
+      <h2 class="text-2xl font-bold mb-6">Settings</h2>
+      <div class="grid md:grid-cols-4 sm:grid-cols-2 gap-8">
+        <!-- Locations -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-5 flex flex-col">
+          <h3 class="text-lg font-semibold mb-3">Locations</h3>
+          <ul id="locList" class="space-y-2 flex-1 max-h-64 overflow-y-auto"></ul>
+          <button id="addLocBtn" class="mt-4 w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded transition">Add Location</button>
+        </div>
+        <!-- Statuses -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-5 flex flex-col">
+          <h3 class="text-lg font-semibold mb-3">Statuses</h3>
+          <ul id="statList" class="space-y-2 flex-1 max-h-64 overflow-y-auto"></ul>
+          <button id="addStatBtn" class="mt-4 w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded transition">Add Status</button>
+        </div>
+        <!-- Vendors -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-5 flex flex-col">
+          <h3 class="text-lg font-semibold mb-3">Vendors</h3>
+          <ul id="vendorList" class="space-y-2 flex-1 max-h-64 overflow-y-auto"></ul>
+          <button id="addVendorBtn" class="mt-4 w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded transition">Add Vendor</button>
+        </div>
+        <!-- Contractors -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-5 flex flex-col">
+          <h3 class="text-lg font-semibold mb-3">Contractors</h3>
+          <ul id="contractorList" class="space-y-2 flex-1 max-h-64 overflow-y-auto"></ul>
+          <button id="addContractorBtn" class="mt-4 w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded transition">
+            Add Contractor
+          </button>
+        </div>
+      </div>
+      <dialog id="entryDialog" class="rounded-xl p-4"></dialog>
+      <dialog id="confirmDialog" class="rounded-xl p-4"></dialog>
+    </section>
+    <script type="module" src="/js/settings.js"></script>
+    <script type="module" src="/js/core.js"></script>
+    <script type="module" src="/js/inventory.js"></script>
+  </body>
+</html>
