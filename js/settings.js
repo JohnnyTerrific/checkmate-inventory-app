@@ -3,7 +3,7 @@ import { showToast } from '../js/core.js';
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
 
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMiJl5Uo",
   authDomain: "checkmate-enova.firebaseapp.com",
   projectId: "checkmate-enova",
