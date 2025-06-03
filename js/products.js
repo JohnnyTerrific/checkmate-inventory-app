@@ -2,6 +2,16 @@
 import { showToast } from '../js/core.js';
 import { loadSettings } from './settings.js';
 
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+import { firebaseConfig } from "./settings.js"; // If you export it from settings.js
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+const PRODUCTS_DOC_KEY = "products"; // Firestore doc id
+const CATEGORIES_DOC_KEY = "categories";
+
 const PRODUCTS_KEY = "cm_products_v1";
 const SETTINGS_KEY = "cm_settings_v2";
 const CATEGORIES_KEY = "cm_categories_v1"; // for extensible category list
@@ -10,44 +20,72 @@ const PRODUCTS_PER_PAGE = 8;
 
 // --- Load/save helpers ---
 
-function loadProducts() {
-  const arr = JSON.parse(localStorage.getItem(PRODUCTS_KEY)) || [];
-  // Ensure all products have order property (legacy safety)
-  arr.forEach((p, idx) => { if (typeof p.order !== "number") p.order = idx; });
-  return arr;
+export async function loadProducts() {
+  try {
+    const docRef = doc(db, "appdata", PRODUCTS_DOC_KEY);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const arr = docSnap.data().products || [];
+      arr.forEach((p, idx) => { if (typeof p.order !== "number") p.order = idx; });
+      return arr;
+    }
+    return [];
+  } catch (e) {
+    console.error("Error loading products:", e);
+    return [];
+  }
 }
-function saveProducts(arr) {
-  localStorage.setItem(PRODUCTS_KEY, JSON.stringify(arr));
+
+export async function saveProducts(arr) {
+  try {
+    await setDoc(doc(db, "appdata", PRODUCTS_DOC_KEY), { products: arr });
+  } catch (e) {
+    console.error("Error saving products:", e);
+  }
 }
-function loadCategories() {
-  return JSON.parse(localStorage.getItem(CATEGORIES_KEY)) || ["AC Charger", "DC Charger", "Spare Part"];
+
+export async function loadCategories() {
+  try {
+    const docRef = doc(db, "appdata", CATEGORIES_DOC_KEY);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return docSnap.data().categories || ["AC Charger", "DC Charger", "Spare Part"];
+    }
+    return ["AC Charger", "DC Charger", "Spare Part"];
+  } catch (e) {
+    console.error("Error loading categories:", e);
+    return ["AC Charger", "DC Charger", "Spare Part"];
+  }
 }
-function saveCategories(arr) {
-  localStorage.setItem(CATEGORIES_KEY, JSON.stringify(arr));
+
+export async function saveCategories(arr) {
+  try {
+    await setDoc(doc(db, "appdata", CATEGORIES_DOC_KEY), { categories: arr });
+  } catch (e) {
+    console.error("Error saving categories:", e);
+  }
 }
 
 // --- Render logic ---
 
-let products = loadProducts();
+let products = [];
 let currentPage = 1;
 
-export function initProducts() {
+export async function initProducts() {
+  products = await loadProducts();
   renderProductsGrid();
   renderPagination();
   document.getElementById("addProductBtn").onclick = () => showProductDialog().then(addProduct);
-
-  // Drag & drop setup (delegated to cards)
 }
 
-function renderProductsGrid() {
-  products = loadProducts().sort((a, b) => a.order - b.order);
+async function renderProductsGrid() {
+  products = await loadProducts();
+  products.sort((a, b) => a.order - b.order);
   const grid = document.getElementById("productsGrid");
   grid.innerHTML = "";
 
-    // Ensure no overflow and set min-height for 2 rows of 4 cards
-    grid.className = "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-stretch min-h-[620px]";
+  grid.className = "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-stretch min-h-[620px]";
 
-  // Pagination slice
   const start = (currentPage - 1) * PRODUCTS_PER_PAGE;
   const pageProducts = products.slice(start, start + PRODUCTS_PER_PAGE);
 
@@ -58,7 +96,6 @@ function renderProductsGrid() {
     card.draggable = true;
     card.setAttribute("data-index", start + i);
 
-    // Card fields: all on front
     card.innerHTML = `
       <div class="absolute bottom-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition">
         <button title="Edit" class="edit-btn text-blue-600"><svg width="20" height="20"><path d="M4 13.5V16h2.5l7.3-7.3-2.5-2.5L4 13.5zM17.7 6.3c.4-.4.4-1 0-1.4l-2.6-2.6a1 1 0 0 0-1.4 0l-1.8 1.8 4 4 1.8-1.8z" fill="currentColor"/></svg></button>
@@ -76,12 +113,10 @@ function renderProductsGrid() {
       <div><span class="font-bold">Description:</span> ${escapeHtml(p.description)}</div>
     `;
 
-    // Edit/Delete
     card.querySelector(".edit-btn").onclick = () => showProductDialog(p, start + i).then(prod => editProduct(prod, start + i));
     card.querySelector(".delete-btn").onclick = () => showConfirmProductDialog(p).then(ok => { if (ok) deleteProduct(start + i); });
 
-    // Drag events
-    card.querySelector(".drag-handle").onmousedown = e => e.stopPropagation(); // avoid drag-handle itself starting drag
+    card.querySelector(".drag-handle").onmousedown = e => e.stopPropagation();
     card.ondragstart = e => {
       e.dataTransfer.setData("dragIndex", start + i);
       card.classList.add("opacity-50");
@@ -146,9 +181,9 @@ function renderPagination() {
 // --- CRUD and Dialogs ---
 
 async function showProductDialog(product = null, editIndex = null) {
-  return new Promise(resolve => {
-    const vendors = loadSettings().vendors || [];
-    const categories = loadCategories();
+  return new Promise(async resolve => {
+    const vendors = (await loadSettings()).vendors || [];
+    const categories = await loadCategories();
 
     // If editing, prefill values
     let initial = product || {
@@ -311,44 +346,43 @@ function showConfirmProductDialog(product) {
   });
 }
 
-function addProduct(prod) {
+async function addProduct(prod) {
   if (!prod) return;
-  products = loadProducts();
-  // Set global order to end of list
+  products = await loadProducts();
   prod.order = products.length > 0 ? Math.max(...products.map(p => p.order)) + 1 : 0;
   products.push(prod);
-  saveProducts(products);
+  await saveProducts(products);
   showToast("Product added", "green");
-  renderProductsGrid();
+  await renderProductsGrid();
   renderPagination();
 }
 
-function editProduct(prod, idx) {
+async function editProduct(prod, idx) {
   if (!prod) return;
-  products = loadProducts();
+  products = await loadProducts();
   Object.assign(products[idx], prod); // preserve order property
-  saveProducts(products);
+  await saveProducts(products);
   showToast("Product updated", "blue");
-  renderProductsGrid();
+  await renderProductsGrid();
 }
 
-function deleteProduct(idx) {
-  products = loadProducts();
+async function deleteProduct(idx) {
+  products = await loadProducts();
   products.splice(idx, 1);
-  saveProducts(products);
+  await saveProducts(products);
   showToast("Product deleted", "red");
-  renderProductsGrid();
+  await renderProductsGrid();
   renderPagination();
 }
 
-function reorderProducts(fromIdx, toIdx) {
-  products = loadProducts().sort((a, b) => a.order - b.order);
+async function reorderProducts(fromIdx, toIdx) {
+  products = await loadProducts();
+  products.sort((a, b) => a.order - b.order);
   const [moved] = products.splice(fromIdx, 1);
   products.splice(toIdx, 0, moved);
-  // Update order field globally
   products.forEach((p, i) => p.order = i);
-  saveProducts(products);
-  renderProductsGrid();
+  await saveProducts(products);
+  await renderProductsGrid();
 }
 
 // --- Utility ---
@@ -360,8 +394,8 @@ function escapeHtml(str) {
 }
 
 // --- For Settings.js: Prevent vendor deletion if in use ---
-export function vendorInUse(vendorName) {
-  const prods = loadProducts();
+export async function vendorInUse(vendorName) {
+  const prods = await loadProducts();
   return prods.filter(p => p.vendor === vendorName).map(p => p.name);
 }
 export { loadProducts };
