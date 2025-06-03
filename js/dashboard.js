@@ -384,8 +384,6 @@ function renderShipmentCountdown(nextTs) {
   update();
 }
 
-// ③ Lists overdue assignments
-import { loadSettings } from "../js/settings.js"; // Add this import at the top
 
 function renderAgingAlerts(stats, inventory) {
   const list = document.getElementById('agingList');
