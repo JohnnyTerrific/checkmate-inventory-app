@@ -883,7 +883,7 @@ dialog.innerHTML = `
   <label>Set status (optional):</label>
   <select id="moveStatus" class="border px-2 py-1 rounded">
     <option value="">-- Keep Current Status --</option>
-    ${loadSettings().statuses.map(s => `<option value="${s}">${s}</option>`).join("")}
+    ${(settings.statuses || []).map(s => `<option value="${s}"${unit.status === s ? " selected" : ""}>${s}</option>`).join("")}
   </select>
   <textarea id="moveComment" placeholder="Comment (optional)" class="border px-2 py-1 rounded"></textarea>
   <div class="flex justify-between gap-2 mt-3">
