@@ -1,5 +1,20 @@
 // --- Data service abstraction ---
 import { showToast } from '../js/core.js';
+import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMiJl5Uo",
+  authDomain: "checkmate-enova.firebaseapp.com",
+  projectId: "checkmate-enova",
+  storageBucket: "checkmate-enova.firebasestorage.app",
+  messagingSenderId: "1036780232884",
+  appId: "1:1036780232884:web:689229ef07859db22e77e1"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+const SETTINGS_KEY = "settings"; // Firestore doc id
 
 // Only show allowed statuses for each location
 export const allowedStatusesByLocation = {
@@ -10,10 +25,7 @@ export const allowedStatusesByLocation = {
     "Public":            ["Installed","Decommissioned","Faulty"]
 };
 
-// ---- Main settings handlers ----
-const SETTINGS_KEY = "cm_settings_v2";
-
-export function loadSettings() {
+export async function loadSettings() {
   const defaults = {
     locations: [
       { name: "Back Warehouse",    parent: null },
@@ -63,18 +75,35 @@ export function loadSettings() {
       }
     ]
   };
-  const loaded = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {};
-  return {
-    locations: loaded.locations || defaults.locations,
-    statuses: loaded.statuses || defaults.statuses,
-    vendors: loaded.vendors || defaults.vendors,
-    contractors: loaded.contractors || defaults.contractors
-  };
+  try {
+    const docRef = doc(db, "appdata", SETTINGS_KEY);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const loaded = docSnap.data();
+      return {
+        locations: loaded.locations || defaults.locations,
+        statuses: loaded.statuses || defaults.statuses,
+        vendors: loaded.vendors || defaults.vendors,
+        contractors: loaded.contractors || defaults.contractors
+      };
+    } else {
+      // No settings in Firestore, return defaults
+      return defaults;
+    }
+  } catch (e) {
+    console.error("Error loading settings from Firestore:", e);
+    return defaults;
+  }
 }
 
-export function saveSettings(data) {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
+export async function saveSettings(data) {
+  try {
+    await setDoc(doc(db, "appdata", SETTINGS_KEY), data);
+  } catch (e) {
+    console.error("Error saving settings to Firestore:", e);
+  }
 }
+
 export function getDashboardStats(inventory, shipments) {
   const byStatus = {};
   let contractorCount = 0, overdueCount = 0, publicCount = 0;
@@ -182,7 +211,7 @@ function showConfirmDialog(msg) {
 }
 
 // --- CRUD Handlers and Rendering ---
-let settings = loadSettings();
+let settings;
 function renderList(type, listId) {
     const ul = document.getElementById(listId);
     ul.innerHTML = "";
@@ -209,28 +238,28 @@ function renderList(type, listId) {
       });
     }
   }  
-  function onAddItem(type, listId, label) {
+  async function onAddItem(type, listId, label) {
     if (type === "locations") {
-      // Parent selection for new location
-      showEntryWithParentDialog("Add Location").then(({ value, parent }) => {
+      showEntryWithParentDialog("Add Location").then(async ({ value, parent }) => {
         if (!value || !parent) return;
         if (!Array.isArray(settings[type])) settings[type] = [];
         settings[type].push({ name: value, parent });
-        saveSettings(settings);
+        await saveSettings(settings);
         renderList(type, listId);
         showToast(label + " added!", "green");
       });
     } else {
-      showEntryDialog(`Add ${label}`).then(value => {
+      showEntryDialog(`Add ${label}`).then(async value => {
         if (!value) return;
         if (!Array.isArray(settings[type])) settings[type] = [];
         settings[type].push(value);
-        saveSettings(settings);
+        await saveSettings(settings);
         renderList(type, listId);
         showToast(label + " added!", "green");
       });
     }
   }
+
   function showEntryWithParentDialog(title) {
     const parentOptions = settings.locations.map(loc => loc.name);
     return new Promise(resolve => {
@@ -266,46 +295,50 @@ function renderList(type, listId) {
     });
   }
   
-  function onEditItem(type, idx) {
-    if (type === "locations") {
-      showEntryWithParentDialog("Edit Location").then(({ value, parent }) => {
-        if (!value || !parent) return;
-        settings[type][idx] = { name: value, parent };
-        saveSettings(settings);
-        renderList(type, getListId(type));
-        showToast("Location updated!", "blue");
-      });
-    } else {
-      showEntryDialog(`Edit`, settings[type][idx]).then(value => {
-        if (!value) return;
-        settings[type][idx] = value;
-        saveSettings(settings);
-        renderList(type, getListId(type));
-        showToast("Item updated!", "blue");
-      });
-    }
+  async function onEditItem(type, idx) {
+  if (type === "locations") {
+    showEntryWithParentDialog("Edit Location").then(async ({ value, parent }) => {
+      if (!value || !parent) return;
+      settings[type][idx] = { name: value, parent };
+      await saveSettings(settings);
+      renderList(type, getListId(type));
+      showToast("Location updated!", "blue");
+    });
+  } else {
+    showEntryDialog(`Edit`, settings[type][idx]).then(async value => {
+      if (!value) return;
+      settings[type][idx] = value;
+      await saveSettings(settings);
+      renderList(type, getListId(type));
+      showToast("Item updated!", "blue");
+    });
   }
-function onDeleteItem(type, idx) {
-  showConfirmDialog(`Delete this item?`).then(ok => {
+}
+
+async function onDeleteItem(type, idx) {
+  showConfirmDialog(`Delete this item?`).then(async ok => {
     if (!ok) return;
     settings[type].splice(idx, 1);
-    saveSettings(settings);
+    await saveSettings(settings);
     renderList(type, getListId(type));
-    showToast(label + " deleted!", "red");
+    showToast("Item deleted!", "red");
   });
 }
-function reorderItem(type, fromIdx, toIdx) {
+
+async function reorderItem(type, fromIdx, toIdx) {
   const arr = settings[type];
   const [moved] = arr.splice(fromIdx, 1);
   arr.splice(toIdx, 0, moved);
-  saveSettings(settings);
+  await saveSettings(settings);
   renderList(type, getListId(type));
 }
+
 function getListId(type) {
   return type === "locations" ? "locList"
     : type === "statuses" ? "statList"
     : "vendorList";
 }
+
 function renderContractorList() {
   const ul = document.getElementById("contractorList");
   ul.innerHTML = "";
@@ -329,8 +362,9 @@ function renderContractorList() {
     ul.appendChild(li);
   });
 }
-function onAddContractor() {
-  showContractorDialog().then(values => {
+
+async function onAddContractor() {
+  showContractorDialog().then(async values => {
     if (!values) return;
     settings.contractors.push({
       id: Date.now(),
@@ -338,30 +372,33 @@ function onAddContractor() {
       company: values.company,
       phone: values.phone
     });
-    saveSettings(settings);
+    await saveSettings(settings);
     renderContractorList();
     showToast("Contractor added!", "green");
   });
 }
-function onEditContractor(idx) {
+
+async function onEditContractor(idx) {
   const c = settings.contractors[idx];
-  showContractorDialog(c).then(values => {
+  showContractorDialog(c).then(async values => {
     if (!values) return;
     settings.contractors[idx] = { ...c, ...values };
-    saveSettings(settings);
+    await saveSettings(settings);
     renderContractorList();
     showToast("Contractor updated!", "blue");
   });
 }
-function onDeleteContractor(idx) {
-  showConfirmDialog("Delete this contractor?").then(ok => {
+
+async function onDeleteContractor(idx) {
+  showConfirmDialog("Delete this contractor?").then(async ok => {
     if (!ok) return;
     settings.contractors.splice(idx, 1);
-    saveSettings(settings);
+    await saveSettings(settings);
     renderContractorList();
     showToast("Contractor deleted!", "red");
   });
 }
+
 function showContractorDialog(init = {}) {
   return new Promise(resolve => {
     const dialog = document.getElementById("entryDialog");
@@ -397,7 +434,8 @@ function showContractorDialog(init = {}) {
 
 
 // --- Wire Everything ---
-export function initSettings() {
+export async function initSettings() {
+  settings = await loadSettings();
   renderList("locations", "locList");
   renderList("statuses", "statList");
   renderList("vendors", "vendorList");
