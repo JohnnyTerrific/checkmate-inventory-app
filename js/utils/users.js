@@ -1,49 +1,48 @@
-// utils/users.js
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { doc, setDoc, getDoc, collection, getDocs } from "firebase/firestore";
+import { auth, db } from './firebase.js'; // Import from your centralized file
+import { onAuthStateChanged } from "firebase/auth";
 
-const USERS_KEY = 'cm_users';
-const SESSION_KEY = 'cm_session_user';
-
-// For MVP, plain password (hash for production!)
-export function loadUsers() {
-    return JSON.parse(localStorage.getItem(USERS_KEY)) || [];
+export function onUserAuthStateChanged(callback) {
+  return onAuthStateChanged(auth, callback);
 }
 
-export function saveUsers(users) {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+export async function getCurrentUserProfile() {
+    const user = getCurrentUser();
+    if (!user) return null;
+    const userDocRef = doc(db, "users", user.uid);
+    const docSnap = await getDoc(userDocRef);
+    return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null;
 }
 
-// Add new user (called by SuperAdmin)
-export function addUser({username, password, role}) {
-    const users = loadUsers();
-    if (users.some(u => u.username === username)) throw new Error('Username already exists');
-    users.push({username, password, role});
-    saveUsers(users);
-}
-
-// Simple login (returns user object or throws)
-export function login(username, password) {
-    const users = loadUsers();
-    const user = users.find(u => u.username === username && u.password === password);
-    if (!user) throw new Error('Invalid username or password');
-    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+export async function addUser(email, password, role) {
+    // 1. Create user in Firebase Auth
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+    // 2. Add user profile to Firestore
+    await setDoc(doc(db, "users", user.uid), {
+      email,
+      role,
+      username: email.split('@')[0], // or however you want to set username
+      createdAt: new Date().toISOString()
+    });
     return user;
+  }
+
+export async function loadUsers() {
+    const snapshot = await getDocs(collection(db, "users"));
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 }
 
-// Logout
-export function logout() {
-    localStorage.removeItem(SESSION_KEY);
-}
-
-// Get current logged-in user (null if none)
 export function getCurrentUser() {
-    return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+    return auth.currentUser;
 }
 
-// Change password (future enhancement)
-export function changePassword(username, newPassword) {
-    const users = loadUsers();
-    const idx = users.findIndex(u => u.username === username);
-    if (idx === -1) throw new Error('User not found');
-    users[idx].password = newPassword;
-    saveUsers(users);
+export async function login(email, password) {
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    return userCredential.user;
+}
+
+export async function logout() {
+    await signOut(auth);
 }

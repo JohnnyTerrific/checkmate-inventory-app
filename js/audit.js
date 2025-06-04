@@ -1,13 +1,14 @@
 // js/audit.js
 
-import { loadAuditLog, getCurrentUser } from '/js/inventory.js'; // Make sure these are exported
+import { loadAuditLog } from './inventory.js';
+import { getCurrentUser } from './utils/users.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   renderAuditLog();
 });
 
-function renderAuditLog() {
-    const logs = (loadAuditLog() || []).reverse();
+async function renderAuditLog() {
+  const logs = ((await loadAuditLog()) || []).reverse();
     const container = document.getElementById('auditTableContainer');
     let auditPage = 1;
     let auditPageSize = 25;

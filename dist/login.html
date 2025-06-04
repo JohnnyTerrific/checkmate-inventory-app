@@ -14,8 +14,8 @@
       background: linear-gradient(135deg, #ede9fe 0%, #d1fae5 100%);
     }
   </style>
-  <script type="module" crossorigin src="/assets/login-RF438CEd.js"></script>
-  <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-B5Qt9EMX.js">
+  <script type="module" crossorigin src="/assets/login-CQ0G4M4m.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/users-B1oCCdPH.js">
 </head>
 <body>
   <div class="bg-white dark:bg-gray-900 shadow-2xl rounded-2xl p-10 w-full max-w-md flex flex-col gap-8">
@@ -23,9 +23,9 @@
     <h2 class="text-2xl font-bold text-purple-700 dark:text-purple-300 text-center">Sign in to CheckMate</h2>
     <form id="loginForm" class="flex flex-col gap-5">
       <div>
-        <label for="loginUsername" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Username</label>
+        <label for="loginEmail" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
         <div class="relative">
-          <input id="loginUsername" type="text" placeholder="Username" autocomplete="username" required class="w-full border rounded-lg px-4 py-3 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-400 outline-none pl-10" />
+          <input id="loginEmail" type="email" placeholder="Email" autocomplete="username" required class="border rounded px-10 py-3 bg-gray-50 dark:bg-gray-800 w-full focus:ring-purple-500 focus:border-purple-500" />
           <svg class="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path d="M16 21v-2a4 4 0 00-8 0v2" />
             <circle cx="12" cy="7" r="4" />
@@ -35,20 +35,22 @@
       <div>
         <label for="loginPassword" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Password</label>
         <div class="relative">
-          <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" required class="w-full border rounded-lg px-4 py-3 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-400 outline-none pr-12 pl-10" />
+          <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" required class="border rounded px-10 py-3 bg-gray-50 dark:bg-gray-800 w-full focus:ring-purple-500 focus:border-purple-500" />
           <svg class="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-            <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
-          <button type="button" id="togglePw" tabindex="-1" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-purple-500">
-            <svg id="eyeIcon" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <button type="button" id="togglePw" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" id="eyeIcon">
               <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
               <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+            </svg>
+            <svg class="w-5 h-5 hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" id="eyeSlashIcon">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
             </svg>
           </button>
         </div>
       </div>
-      <div id="loginError" class="text-red-600 min-h-[1.5em]"></div>
+      <div id="loginError" class="text-red-600 min-h-[1.5em] text-sm"></div>
       <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white py-3 px-4 rounded-lg font-semibold shadow transition">Login</button>
     </form>
   </div>

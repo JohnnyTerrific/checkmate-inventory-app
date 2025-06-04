@@ -1,13 +1,9 @@
 // products.js
 import { showToast } from '../js/core.js';
 import { loadSettings } from './settings.js';
+import { db } from './utils/firebase.js'; // <-- Use the shared db instance!
+import { doc, getDoc, setDoc } from "firebase/firestore";
 
-import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
-import { firebaseConfig } from "./settings.js"; // If you export it from settings.js
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
 
 const PRODUCTS_DOC_KEY = "products"; // Firestore doc id
 const CATEGORIES_DOC_KEY = "categories";
@@ -49,12 +45,12 @@ export async function loadCategories() {
     const docRef = doc(db, "appdata", CATEGORIES_DOC_KEY);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
-      return docSnap.data().categories || ["AC Charger", "DC Charger", "Spare Part"];
+      return docSnap.data().categories || [];
     }
-    return ["AC Charger", "DC Charger", "Spare Part"];
+    return [];
   } catch (e) {
     console.error("Error loading categories:", e);
-    return ["AC Charger", "DC Charger", "Spare Part"];
+    return [];
   }
 }
 
@@ -84,8 +80,8 @@ async function renderProductsGrid() {
   const grid = document.getElementById("productsGrid");
   grid.innerHTML = "";
 
-  grid.className = "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-stretch min-h-[620px]";
-
+  grid.className = "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-start";
+  
   const start = (currentPage - 1) * PRODUCTS_PER_PAGE;
   const pageProducts = products.slice(start, start + PRODUCTS_PER_PAGE);
 
@@ -239,18 +235,18 @@ if (cancelBtn) {
 
     dialog.showModal();
 
-    // Add new category logic
-    dialog.querySelector("#addCatBtn").onclick = () => {
-      const newCat = prompt("Enter new category name:");
-      if (newCat && !categories.includes(newCat)) {
-        categories.push(newCat);
-        saveCategories(categories);
-        dialog.querySelector("#category").innerHTML = `
-          <option value="">-- Select Category --</option>
-          ${categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")}
-        `;
-      }
-    };
+    // inside showProductDialog
+dialog.querySelector("#addCatBtn").onclick = async () => {
+  const newCat = await showAddCategoryDialog(categories);
+  if (newCat && !categories.includes(newCat)) {
+    categories.push(newCat);
+    await saveCategories(categories);
+    dialog.querySelector("#category").innerHTML = `
+      <option value="">-- Select Category --</option>
+      ${categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")}
+    `;
+  }
+};
 
     dialog.querySelector('form').onsubmit = e => {
       e.preventDefault();
@@ -383,6 +379,51 @@ async function reorderProducts(fromIdx, toIdx) {
   products.forEach((p, i) => p.order = i);
   await saveProducts(products);
   await renderProductsGrid();
+}
+
+function showAddCategoryDialog(existingCategories = []) {
+  return new Promise(resolve => {
+    const dialog = document.getElementById("addCategoryDialog");
+    dialog.innerHTML = `
+      <form method="dialog" class="flex flex-col gap-3 w-80 p-4 bg-white dark:bg-gray-800 rounded-xl">
+        <h3 class="font-bold mb-2 text-purple-700">Add New Category</h3>
+        <div class="text-red-600 text-xs min-h-[1em]" id="catFormError"></div>
+        <input id="catNameInput" type="text" placeholder="Category name" required class="border px-2 py-1 rounded" autofocus>
+        <div class="flex justify-end gap-2 mt-3">
+          <button type="button" value="cancel" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
+          <button value="ok" class="bg-purple-600 text-white px-3 py-1 rounded">Add</button>
+        </div>
+      </form>
+    `;
+    dialog.showModal();
+
+    const form = dialog.querySelector("form");
+    const input = dialog.querySelector("#catNameInput");
+    const errorDiv = dialog.querySelector("#catFormError");
+
+    dialog.querySelector('button[value="cancel"]').onclick = e => {
+      e.preventDefault();
+      dialog.close();
+      resolve(null);
+    };
+
+    form.onsubmit = e => {
+      e.preventDefault();
+      const value = input.value.trim();
+      if (!value) {
+        errorDiv.textContent = "Category name is required.";
+        input.classList.add("border-red-500");
+        return;
+      }
+      if (existingCategories.includes(value)) {
+        errorDiv.textContent = "Category already exists.";
+        input.classList.add("border-red-500");
+        return;
+      }
+      dialog.close();
+      resolve(value);
+    };
+  });
 }
 
 // --- Utility ---

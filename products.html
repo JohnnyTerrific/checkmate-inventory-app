@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <title>CheckMate Inventory Management</title>
-  <link rel="shortcut icon" type="image/png" href="/assets/img/logo-mini.png">
+  <link rel="shortcut icon" type="image/png" href="/img/logo-mini.png">
   <!-- Tailwind CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = { darkMode: 'class' }
   </script>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="/assets/css/style.css">
+  <link rel="stylesheet" href="/assets/css/style.css" />
   <style>
     body { visibility: hidden; }
   </style>
@@ -29,8 +29,31 @@
       <!-- Dialogs -->
       <dialog id="productDialog" class="rounded-xl p-4"></dialog>
       <dialog id="confirmProductDialog" class="rounded-xl p-4"></dialog>
+      <dialog id="addCategoryDialog" class="rounded-xl p-0"></dialog>
     </section>
-    <script type="module" src="/js/core.js"></script>
-    <script type="module" src="/js/inventory.js"></script>
+
+     <!-- 1) Firestore & Auth SDKs -->
+ <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-app-compat.js"></script>
+ <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-auth-compat.js"></script>
+ <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore-compat.js"></script>
+
+ <!-- 2) Initialize Firebase BEFORE any module -->
+ <script>
+   const firebaseConfig = {
+     apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMjlJ5Uo",
+     authDomain: "checkmate-enova.firebaseapp.com",
+     projectId: "checkmate-enova",
+     storageBucket: "checkmate-enova.appspot.com",
+     messagingSenderId: "103678023284",
+     appId: "1:103678023284:web:689229ef07859db22e77e1"
+   };
+   firebase.initializeApp(firebaseConfig);
+   window.db   = firebase.firestore();
+   window.auth = firebase.auth();
+ </script>
+
+ <!-- 3) Modules (after Firebase) -->
+ <script type="module" src="/js/core.js"></script>
+ <script type="module" src="/js/inventory.js"></script>
   </body>
   </html>

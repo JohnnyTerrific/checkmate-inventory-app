@@ -1,72 +1,36 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>CheckMate Inventory Management</title>
-  <link rel="shortcut icon" type="image/png" href="/assets/img/logo-mini.png">
-  <!-- Tailwind CDN -->
+  <link rel="shortcut icon" type="image/png" href="/img/logo-mini.png" />
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-  <!-- Firebase App (Core) -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-app-compat.js"></script>
-  <!-- Firebase Auth -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-auth-compat.js"></script>
-  <!-- Firestore Database -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore-compat.js"></script>
-
-  <script type="module" src="/js/index.js"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class'
-    }
-  </script>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="/assets/css/style.css">
-  <style>
-    body { visibility: hidden; }
-  </style>
-
-<script>
-  // Your Firebase configuration from the Firebase Console
-  const firebaseConfig = {
-    apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMjlJ5Uo",
-    authDomain: "checkmate-enova.firebaseapp.com",
-    projectId: "checkmate-enova",
-    storageBucket: "checkmate-enova.appspot.com",
-    messagingSenderId: "103678023284",
-    appId: "1:103678023284:web:689229ef07859db22e77e1"
-  };
-
-  // Initialize Firebase
-  firebase.initializeApp(firebaseConfig);
-  window.db = firebase.firestore();
-  window.auth = firebase.auth();
-</script>
-
+  <script>tailwind.config = { darkMode: 'class' }</script>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/assets/css/style.css" />
+  <style> body { visibility: hidden; } </style>
 </head>
 <body data-page="home">
-  <section id="index-main" class="max-w-7xl mx-auto px-4 py-4 space-y-2">
-<!-- KPI Cards -->
-<div id="kpi-cards" class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto mt-8 mb-8"></div>
-
-<!-- Donut Chart -->
-<div class="flex justify-center mb-8">
-  <div class="bg-white rounded-xl shadow p-6" style="width:340px;">
-    <canvas id="assetDonut" width="320" height="320"></canvas>
-  </div>
-</div>
-
-<!-- Milestone Progress Bar -->
-<div id="milestone-progress" class="max-w-2xl mx-auto mb-8"></div>
-
-<!-- Depreciation Summary -->
-<div id="depreciation-summary" class="max-w-2xl mx-auto text-center text-lg font-semibold text-gray-700 mb-8"></div>
-</section>
-<link rel="shortcut icon" type="image/png" href="/assets/img/logo-mini.png">
-<link rel="stylesheet" href="/assets/css/style.css">
-<script type="module" src="/js/core.js"></script>
-<script type="module" src="/js/inventory.js"></script>
+  <!-- Shell will be injected here by core.js -->
+  <main id="main-content-area" class="p-4 md:p-6 lg:p-8"> <!-- Add a main content area for page specific content -->
+    <section id="index-main" class="max-w-7xl mx-auto px-4 py-4 space-y-2">
+        <!-- KPI Cards -->
+        <div id="kpi-cards" class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto mt-8 mb-8"></div>
+        <!-- Donut Chart -->
+        <div class="flex justify-center mb-8">
+          <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-6" style="width:340px;">
+            <canvas id="assetDonut" width="320" height="320"></canvas>
+          </div>
+        </div>
+        <!-- Milestone Progress Bar -->
+        <div id="milestone-progress" class="max-w-2xl mx-auto mb-8"></div>
+        <!-- Depreciation Summary -->
+        <div id="depreciation-summary" class="max-w-2xl mx-auto text-center text-lg font-semibold text-gray-700 dark:text-gray-200 mb-8"></div>
+    </section>
+  </main>
+  
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <!-- Chart.js for index page -->
+  <script type="module" src="/js/core.js"></script> <!-- For shell, common UI, and auth handling -->
+  <script type="module" src="/js/index.js"></script> <!-- Page-specific logic for index.html -->
 </body>
 </html>
-

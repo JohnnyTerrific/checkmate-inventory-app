@@ -16,11 +16,11 @@
 
   <!-- Hide until JS is ready -->
   <style> body { visibility: hidden; } </style>
-
-  <script type="module" crossorigin src="/assets/modulepreload-polyfill-B5Qt9EMX.js"></script>
-  <script type="module" crossorigin src="/assets/style-M5oUV0tE.js"></script>
-  <script type="module" crossorigin src="/assets/shipments-NqBIIjwH.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/style-BPjdllgS.css">
+
+  <link rel="stylesheet" href="/assets/css/style.css">
+  <script type="module" crossorigin src="/assets/users-B1oCCdPH.js"></script>
+  <script type="module" crossorigin src="/assets/inventory-CC2awVC6.js"></script>
+  <script type="module" crossorigin src="/assets/shipments-DsUs0R8O.js"></script>
 </head>
 <body data-page="inventory">
   <div class="flex gap-2 mb-4">
@@ -36,8 +36,26 @@
 
   <div id="main-content" class="overflow-x-hidden w-full">
 
-  <!-- core utilities -->
-  <!-- other feature modules -->
-  <!-- inventory-specific logic -->
+     <!-- 1) Firestore & Auth SDKs -->
+ <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-app-compat.js"></script>
+ <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-auth-compat.js"></script>
+ <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore-compat.js"></script>
+
+ <!-- 2) Initialize Firebase BEFORE any module -->
+ <script>
+   const firebaseConfig = {
+     apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMjlJ5Uo",
+     authDomain: "checkmate-enova.firebaseapp.com",
+     projectId: "checkmate-enova",
+     storageBucket: "checkmate-enova.appspot.com",
+     messagingSenderId: "103678023284",
+     appId: "1:103678023284:web:689229ef07859db22e77e1"
+   };
+   firebase.initializeApp(firebaseConfig);
+   window.db   = firebase.firestore();
+   window.auth = firebase.auth();
+ </script>
+
+ <!-- 3) Modules (after Firebase) -->
 </body>
 </html>

@@ -1,7 +1,7 @@
 // --- Data service abstraction ---
 import { showToast } from '../js/core.js';
-import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+import { db } from './utils/firebase.js'; // <-- Use your shared db instance!
+import { doc, getDoc, setDoc } from "firebase/firestore";
 
 export const firebaseConfig = {
   apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMiJl5Uo",
@@ -11,9 +11,6 @@ export const firebaseConfig = {
   messagingSenderId: "1036780232884",
   appId: "1:1036780232884:web:689229ef07859db22e77e1"
 };
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
 
 const SETTINGS_KEY = "settings"; // Firestore doc id
 
@@ -241,7 +238,9 @@ function renderList(type, listId) {
   }  
   async function onAddItem(type, listId, label) {
     if (type === "locations") {
-      showEntryWithParentDialog("Add Location").then(async ({ value, parent }) => {
+      showEntryWithParentDialog("Add Location").then(async (result) => {
+        if (!result) return; // <-- Fix: check for undefined
+        const { value, parent } = result;
         if (!value || !parent) return;
         if (!Array.isArray(settings[type])) settings[type] = [];
         settings[type].push({ name: value, parent });
@@ -261,17 +260,17 @@ function renderList(type, listId) {
     }
   }
 
-  function showEntryWithParentDialog(title) {
+  function showEntryWithParentDialog(title, initValue = "", initParent = "") {
     const parentOptions = settings.locations.map(loc => loc.name);
     return new Promise(resolve => {
       const dialog = document.getElementById("entryDialog");
       dialog.innerHTML = `
         <form method="dialog" class="flex flex-col gap-3">
           <h3 class="font-bold">${title}</h3>
-          <input id="entryInput" type="text" class="border px-2 py-1 rounded" required autofocus placeholder="Location Name">
+          <input id="entryInput" type="text" class="border px-2 py-1 rounded" required autofocus placeholder="Location Name" value="${initValue}">
           <select id="parentSelect" class="border px-2 py-1 rounded">
             <option value="">-- Select Parent Stock --</option>
-            ${parentOptions.map(opt => `<option value="${opt}">${opt}</option>`).join("")}
+            ${parentOptions.map(opt => `<option value="${opt}"${opt === initParent ? " selected" : ""}>${opt}</option>`).join("")}
           </select>
           <div class="flex justify-end gap-2">
             <button type="button" value="cancel" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
@@ -297,24 +296,27 @@ function renderList(type, listId) {
   }
   
   async function onEditItem(type, idx) {
-  if (type === "locations") {
-    showEntryWithParentDialog("Edit Location").then(async ({ value, parent }) => {
-      if (!value || !parent) return;
-      settings[type][idx] = { name: value, parent };
-      await saveSettings(settings);
-      renderList(type, getListId(type));
-      showToast("Location updated!", "blue");
-    });
-  } else {
-    showEntryDialog(`Edit`, settings[type][idx]).then(async value => {
-      if (!value) return;
-      settings[type][idx] = value;
-      await saveSettings(settings);
-      renderList(type, getListId(type));
-      showToast("Item updated!", "blue");
-    });
+    if (type === "locations") {
+      const current = settings[type][idx];
+      showEntryWithParentDialog("Edit Location", current.name, current.parent).then(async (result) => {
+        if (!result) return;
+        const { value, parent } = result;
+        if (!value || !parent) return;
+        settings[type][idx] = { name: value, parent };
+        await saveSettings(settings);
+        renderList(type, getListId(type));
+        showToast("Location updated!", "blue");
+      });
+    } else {
+      showEntryDialog(`Edit`, settings[type][idx]).then(async value => {
+        if (!value) return;
+        settings[type][idx] = value;
+        await saveSettings(settings);
+        renderList(type, getListId(type));
+        showToast("Item updated!", "blue");
+      });
+    }
   }
-}
 
 async function onDeleteItem(type, idx) {
   showConfirmDialog(`Delete this item?`).then(async ok => {

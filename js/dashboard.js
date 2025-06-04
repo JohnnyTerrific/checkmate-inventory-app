@@ -1,4 +1,4 @@
-import { loadInventory } from "../js/inventory.js";
+import { loadInventory, loadShipments } from "../js/inventory.js";
 import { getDashboardStats } from "../js/settings.js";
 import { loadSettings } from "../js/settings.js";
 
@@ -553,12 +553,13 @@ function showChargerListForStatus(status) {
   // Main Dashboard Loader
   document.addEventListener('DOMContentLoaded', () => {
     if (document.body.dataset.page === "dashboard") {
-      waitForMainContent(() => {
+      waitForMainContent(async () => {
         injectDashboardPage();
-        const inventory = loadInventory();
-        const stats = getDashboardStats(inventory, window.shipments || []);
+        const inventory = await loadInventory();
+        const shipments = await loadShipments();
+        const stats = getDashboardStats(inventory, shipments);
         renderStatCards(stats, inventory);
-        // populate filters…
+        // ...other render calls...
         renderShipmentCountdown(stats.nextShipment);
         renderAgingAlerts(stats, inventory);
         renderStatusDonut(stats.byStatus);

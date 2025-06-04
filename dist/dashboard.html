@@ -3,21 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <title>CheckMate Inventory Management</title>
-  <link rel="shortcut icon" type="image/png" href="/assets/img/logo-mini.png">
+  <link rel="shortcut icon" type="image/png" href="/img/logo-mini.png">
   <!-- Tailwind CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = { darkMode: 'class' }
   </script>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/assets/css/style.css" />
   <style>
     body { visibility: hidden; }
   </style>
-  <script type="module" crossorigin src="/assets/dashboard-otjVK00Y.js"></script>
-  <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-B5Qt9EMX.js">
-  <link rel="modulepreload" crossorigin href="/assets/style-M5oUV0tE.js">
-  <link rel="modulepreload" crossorigin href="/assets/shipments-NqBIIjwH.js">
-  <link rel="stylesheet" crossorigin href="/assets/style-BPjdllgS.css">
+  <script type="module" crossorigin src="/assets/dashboard-roqOMFt1.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/users-B1oCCdPH.js">
+  <link rel="modulepreload" crossorigin href="/assets/inventory-CC2awVC6.js">
+  <link rel="modulepreload" crossorigin href="/assets/shipments-DsUs0R8O.js">
 </head>
 <body data-page="dashboard">
   <section>
@@ -34,8 +34,29 @@
     <canvas id="locationBar" style="width:100%;height:300px"></canvas>
   </div>
 </div>
-  </section>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/countup.js@2.6.2/dist/countUp.umd.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+  </section>
+   <!-- 1) Firestore & Auth SDKs -->
+ <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-app-compat.js"></script>
+ <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-auth-compat.js"></script>
+ <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore-compat.js"></script>
+
+ <!-- 2) Initialize Firebase BEFORE any module -->
+ <script>
+   const firebaseConfig = {
+     apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMjlJ5Uo",
+     authDomain: "checkmate-enova.firebaseapp.com",
+     projectId: "checkmate-enova",
+     storageBucket: "checkmate-enova.appspot.com",
+     messagingSenderId: "103678023284",
+     appId: "1:103678023284:web:689229ef07859db22e77e1"
+   };
+   firebase.initializeApp(firebaseConfig);
+   window.db   = firebase.firestore();
+   window.auth = firebase.auth();
+ </script>
+
+   <!-- 3) Modules (only after Firebase) -->
+ <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+ <script src="https://cdn.jsdelivr.net/npm/countup.js@2.6.2/dist/countUp.umd.js"></script>
+ <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
   </body>

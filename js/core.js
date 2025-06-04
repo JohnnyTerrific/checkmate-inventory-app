@@ -1,10 +1,24 @@
-import { shellHTML } from './pages/partials/shell.js';
-import { getCurrentUser, login, logout, addUser, loadUsers } from './utils/users.js';
-import { can, getPermissions } from './utils/permissions.js';
-window.getCurrentUser = getCurrentUser;
+import { onUserAuthStateChanged, getCurrentUser, logout, addUser, loadUsers, getCurrentUserProfile } from './utils/users.js';
+import { can } from './utils/permissions.js'; // Assuming getPermissions is used by 'can'
+import { db } from './utils/firebase.js';
+import { doc, updateDoc, deleteDoc } from "firebase/firestore";
+import { shellHTML } from './pages/partials/shell.js'; // Adjust path as needed
 
 
-function showUserManagementModal() {
+async function updateUserRoleInFirestore(uid, newRole) {
+  const userDocRef = doc(db, "users", uid);
+  try {
+    await updateDoc(userDocRef, { role: newRole });
+    showToast("User role updated successfully.", "green");
+    await showUserManagementModal(); // Refresh modal
+  } catch (error) {
+    console.error("Error updating user role:", error);
+    showToast("Error updating user role.", "red");
+  }
+}
+
+async function showUserManagementModal() {
+  console.log("Opening Manage Users dialog...");
   let dialog = document.getElementById('userManagementDialog');
   if (!dialog) {
     dialog = document.createElement('dialog');
@@ -12,7 +26,8 @@ function showUserManagementModal() {
     dialog.className = 'bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-8 max-w-2xl w-full mx-auto border border-gray-200 dark:border-gray-800';
     document.body.appendChild(dialog);
   }
-  const users = loadUsers();
+  const users = await loadUsers();
+
   dialog.innerHTML = `
   <h2 class="text-2xl font-bold mb-6 text-purple-700">Manage Users</h2>
   <div class="overflow-x-auto mb-6">
@@ -27,7 +42,7 @@ function showUserManagementModal() {
       <tbody>
         ${users.map(u => `
           <tr class="hover:bg-purple-50 dark:hover:bg-gray-800 transition">
-            <td class="px-4 py-3">${u.username}</td>
+            <td class="px-4 py-3">${u.email}</td>
             <td class="px-4 py-3">${u.role}</td>
             <td class="px-4 py-3 flex gap-2">
               ${u.role !== 'SuperAdmin' ? `
@@ -90,41 +105,43 @@ if (toggleAddPw) {
   dialog.showModal();
 
   // Add user
-  dialog.querySelector('#addUserForm').onsubmit = function(e) {
+  dialog.querySelector('#addUserForm').onsubmit = async function(e) {
     e.preventDefault();
-    const username = dialog.querySelector('#addUsername').value.trim();
+    const email = dialog.querySelector('#addUsername').value.trim();
     const password = dialog.querySelector('#addPassword').value;
     const role = dialog.querySelector('#addRole').value;
     try {
-      addUser({ username, password, role });
-      showUserManagementModal(); // Reload modal with updated users
+      await addUser(email, password, role);
+      await showUserManagementModal(); // Refresh user list
     } catch (err) {
       dialog.querySelector('#userMgmtError').textContent = err.message;
     }
   };
-
+  
   // Delete user
   dialog.querySelectorAll('.deleteUserBtn').forEach(btn => {
-    btn.onclick = function() {
-      const username = btn.dataset.user;
-      if (confirm(`Delete user ${username}?`)) {
-        const users = loadUsers().filter(u => u.username !== username);
-        saveUsers(users);
-        showUserManagementModal(); // Reload
+    btn.onclick = async function() {
+      const email = btn.dataset.user;
+      const user = users.find(u => u.email === email);
+      if (!user) return;
+      if (confirm(`Delete user ${email}?`)) {
+        // Remove from Firestore
+        const db = getFirestore();
+        await deleteDoc(doc(db, "users", user.id));
+        showUserManagementModal();
       }
     }
   });
 
   // Edit user
-dialog.querySelectorAll('.editUserBtn').forEach(btn => {
-  btn.onclick = function() {
-    const username = btn.dataset.user;
-    const user = users.find(u => u.username === username);
-    if (!user) return;
-    // Show edit form modal
-    showEditUserModal(user);
-  };
-});
+  dialog.querySelectorAll('.editUserBtn').forEach(btn => {
+    btn.onclick = function() {
+      const email = btn.dataset.user;
+      const user = users.find(u => u.email === email);
+      if (!user) return;
+      showEditUserModal(user);
+    };
+  });
 
 // Show/Change password
 dialog.querySelectorAll('.pwUserBtn').forEach(btn => {
@@ -466,21 +483,22 @@ function setupSidebarToggle() {
 
 
 // Now this will work!
-document.addEventListener('DOMContentLoaded', async () => {
-  initApp();
-  if (!getCurrentUser()) {
-    window.location.replace("/login.html");
-    return;
-  }
-
-  await injectShell();
-  setupUserHeaderEvents();
+document.addEventListener('DOMContentLoaded', () => {
+  onUserAuthStateChanged(async (user) => {
+    if (!user) {
+      if (!window.location.pathname.endsWith('/login.html')) {
+        window.location.replace("/login.html");
+      }
+      return;
+    }
+    // User is authenticated
+    await injectShell();
+    setupUserHeaderEvents();
 
   // User info and logout
   const userInfoDiv = document.getElementById('currentUserInfo');
   const logoutBtn = document.getElementById('logoutBtn');
   const manageUsersBtn = document.getElementById('manageUsersBtn');
-  const user = getCurrentUser();
 
   if (user && userInfoDiv && logoutBtn) {
     userInfoDiv.textContent = `User: ${user.username} (${user.role})`;
@@ -582,6 +600,12 @@ if (globalSearchBtn && globalSearchDialog) {
 }
 
 window.openGlobalSearchDialog = function () {
+  let globalSearchDialog = document.getElementById('globalSearchDialog');
+  if (!globalSearchDialog) {
+    globalSearchDialog = document.createElement('dialog');
+    globalSearchDialog.id = 'globalSearchDialog';
+    document.body.appendChild(globalSearchDialog);
+  }
   globalSearchDialog.innerHTML = `
     <form method="dialog" class="flex flex-col gap-4 w-[30rem] max-w-full">
       <h3 class="font-bold text-lg mb-2 text-purple-700 dark:text-purple-300">Global Search</h3>
@@ -788,6 +812,7 @@ if (shipmentBtn) {
 
 
   document.body.style.visibility = 'visible';
+});
 });
 
 export function showToast(message, color = "green") {

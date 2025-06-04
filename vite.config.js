@@ -10,8 +10,8 @@ export default defineConfig({
         products: 'products.html',
         settings: 'settings.html',
         audit: 'audit.html',
-        login: 'login.html',
-        // Add more pages here if needed
+        login: 'login.html'
+        // Add more if needed
       }
     }
   }
