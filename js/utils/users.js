@@ -8,11 +8,23 @@ export function onUserAuthStateChanged(callback) {
 }
 
 export async function getCurrentUserProfile() {
-    const user = getCurrentUser();
-    if (!user) return null;
-    const userDocRef = doc(db, "users", user.uid);
-    const docSnap = await getDoc(userDocRef);
-    return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null;
+  const user = getCurrentUser();
+  if (!user) return null;
+  const userDocRef = doc(db, "users", user.uid);
+  const docSnap = await getDoc(userDocRef);
+  if (docSnap.exists()) {
+      return { id: docSnap.id, ...docSnap.data() };
+  } else {
+      // Auto-create minimal profile if missing
+      const profile = {
+          email: user.email,
+          role: "Agent", // or your default role
+          username: user.email.split('@')[0],
+          createdAt: new Date().toISOString()
+      };
+      await setDoc(userDocRef, profile);
+      return { id: user.uid, ...profile };
+  }
 }
 
 export async function addUser(email, password, role) {
@@ -34,8 +46,16 @@ export async function loadUsers() {
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 }
 
+export function getCurrentUserId() {
+  return auth.currentUser?.uid || "Unknown";
+}
+
 export function getCurrentUser() {
-    return auth.currentUser;
+  return auth.currentUser;
+}
+
+export function getCurrentUserEmail() {
+  return auth.currentUser?.email || "Unknown";
 }
 
 export async function login(email, password) {
@@ -45,4 +65,11 @@ export async function login(email, password) {
 
 export async function logout() {
     await signOut(auth);
+}
+export async function getCurrentUserRole() {
+  const user = getCurrentUser();
+  if (!user) return null;
+  const userDocRef = doc(db, "users", user.uid);
+  const docSnap = await getDoc(userDocRef);
+  return docSnap.exists() ? docSnap.data().role : null;
 }

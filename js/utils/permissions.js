@@ -1,4 +1,5 @@
 // utils/permissions.js
+import { getCurrentUserRole } from './users.js';
 
 export const ROLE_PERMISSIONS = {
     SuperAdmin: {
@@ -47,8 +48,7 @@ export const ROLE_PERMISSIONS = {
 export function getPermissions(role) {
     return ROLE_PERMISSIONS[role] || {};
 }
-export function can(permission) {
-    // You must import getCurrentUser from users.js
-    const user = window.getCurrentUser ? window.getCurrentUser() : null;
-    return user && getPermissions(user.role)[permission];
-}
+export async function can(permission) {
+    const role = await getCurrentUserRole();
+    return !!getPermissions(role)[permission];
+  }

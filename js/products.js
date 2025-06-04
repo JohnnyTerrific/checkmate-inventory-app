@@ -2,65 +2,83 @@
 import { showToast } from '../js/core.js';
 import { loadSettings } from './settings.js';
 import { db } from './utils/firebase.js'; // <-- Use the shared db instance!
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  setDoc,
+  collection,
+  getDocs,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  writeBatch,
+  query,
+  orderBy
+} from "firebase/firestore";
 
-
-const PRODUCTS_DOC_KEY = "products"; // Firestore doc id
-const CATEGORIES_DOC_KEY = "categories";
-
-const PRODUCTS_KEY = "cm_products_v1";
-const SETTINGS_KEY = "cm_settings_v2";
-const CATEGORIES_KEY = "cm_categories_v1"; // for extensible category list
-
-const PRODUCTS_PER_PAGE = 8;
-
-// --- Load/save helpers ---
-
-export async function loadProducts() {
-  try {
-    const docRef = doc(db, "appdata", PRODUCTS_DOC_KEY);
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      const arr = docSnap.data().products || [];
-      arr.forEach((p, idx) => { if (typeof p.order !== "number") p.order = idx; });
-      return arr;
-    }
-    return [];
-  } catch (e) {
-    console.error("Error loading products:", e);
-    return [];
-  }
-}
-
-export async function saveProducts(arr) {
-  try {
-    await setDoc(doc(db, "appdata", PRODUCTS_DOC_KEY), { products: arr });
-  } catch (e) {
-    console.error("Error saving products:", e);
-  }
-}
 
 export async function loadCategories() {
-  try {
-    const docRef = doc(db, "appdata", CATEGORIES_DOC_KEY);
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      return docSnap.data().categories || [];
-    }
-    return [];
-  } catch (e) {
-    console.error("Error loading categories:", e);
-    return [];
-  }
+  // Read from appdata/categories (document)
+  const docRef = doc(db, "appdata", "categories");
+  const snapshot = await getDoc(docRef);
+  if (!snapshot.exists()) return [];
+  return snapshot.data().categories || [];
 }
 
-export async function saveCategories(arr) {
-  try {
-    await setDoc(doc(db, "appdata", CATEGORIES_DOC_KEY), { categories: arr });
-  } catch (e) {
-    console.error("Error saving categories:", e);
-  }
+export async function saveCategories(categories) {
+  await setDoc(
+    doc(db, "appdata", "categories"),
+    { categories }
+  );
 }
+
+const PRODUCTS_SUBCOLLECTION_PATH = ["Products"];
+const PRODUCTS_PER_PAGE = 8;
+
+// Load all products from the products collection
+export async function loadProducts() {
+    // Query the “products” subcollection under /Products/appdata/
+    const q = query(
+      collection(db, ...PRODUCTS_SUBCOLLECTION_PATH),
+      orderBy("order", "asc")
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  }
+
+// Add a new product
+export async function saveProduct(prod) {
+    await addDoc(
+      collection(db, ...PRODUCTS_SUBCOLLECTION_PATH),
+      prod
+    );
+  }
+
+// Update an existing product
+export async function updateProduct(id, prod) {
+    await updateDoc(
+      doc(db, ...PRODUCTS_SUBCOLLECTION_PATH, id),
+      prod
+    );
+  }
+
+// Delete a product
+export async function deleteProductById(id) {
+    await deleteDoc(doc(db, ...PRODUCTS_SUBCOLLECTION_PATH, id));
+  }
+
+
+// Reorder products
+export async function reorderProducts(idsInOrder) {
+    const batch = writeBatch(db);
+    idsInOrder.forEach((id, idx) => {
+      batch.update(
+        doc(db, ...PRODUCTS_SUBCOLLECTION_PATH, id),
+        { order: idx }
+      );
+    });
+    await batch.commit();
+  }
 
 // --- Render logic ---
 
@@ -102,7 +120,9 @@ async function renderProductsGrid() {
       <div><span class="font-bold">Vendor:</span> ${escapeHtml(p.vendor)}</div>
       <div><span class="font-bold">HS Code:</span> ${escapeHtml(p.hsCode)}</div>
       <div><span class="font-bold">Category:</span> ${escapeHtml(p.category)}</div>
-      <div><span class="font-bold">Price:</span> ${parseFloat(p.price).toLocaleString(undefined, {style: "currency", currency: "USD"})}</div>
+      <div><span class="font-bold">Price:</span> ${
+  isNaN(parseFloat(p.price)) ? "-" : parseFloat(p.price).toLocaleString(undefined, {style: "currency", currency: "USD"})
+}</div>
       <div><span class="font-bold">Duty Rate:</span> ${p.dutyRate}%</div>
       <div><span class="font-bold">Customs Liability:</span> ${escapeHtml(p.customsLiability)}</div>
       <div><span class="font-bold">Depreciation Rate:</span> ${p.depreciationRate}%</div>
@@ -110,7 +130,7 @@ async function renderProductsGrid() {
     `;
 
     card.querySelector(".edit-btn").onclick = () => showProductDialog(p, start + i).then(prod => editProduct(prod, start + i));
-    card.querySelector(".delete-btn").onclick = () => showConfirmProductDialog(p).then(ok => { if (ok) deleteProduct(start + i); });
+    card.querySelector(".delete-btn").onclick = () => showConfirmProductDialog(p).then(ok => { if (ok) deleteProduct(p); });
 
     card.querySelector(".drag-handle").onmousedown = e => e.stopPropagation();
     card.ondragstart = e => {
@@ -123,7 +143,7 @@ async function renderProductsGrid() {
     card.ondrop = e => {
       card.classList.remove("ring-2", "ring-purple-400");
       const fromIdx = +e.dataTransfer.getData("dragIndex");
-      if (fromIdx !== start + i) reorderProducts(fromIdx, start + i);
+      if (fromIdx !== start + i) reorderProductsByIndex(fromIdx, start + i);
     };
 
     grid.appendChild(card);
@@ -180,6 +200,7 @@ async function showProductDialog(product = null, editIndex = null) {
   return new Promise(async resolve => {
     const vendors = (await loadSettings()).vendors || [];
     const categories = await loadCategories();
+    console.log("Loaded categories:", categories);
 
     // If editing, prefill values
     let initial = product || {
@@ -200,9 +221,16 @@ async function showProductDialog(product = null, editIndex = null) {
     </select>
     <input id="hsCode" type="text" placeholder="HS Code" required class="border px-2 py-1 rounded" value="${escapeHtml(initial.hsCode)}">
     <select id="category" required class="border px-2 py-1 rounded">
-      <option value="">-- Select Category --</option>
-      ${categories.map(c => `<option value="${escapeHtml(c)}" ${c === initial.category ? "selected" : ""}>${escapeHtml(c)}</option>`).join("")}
-    </select>
+  <option value="">-- Select Category --</option>
+  ${categories
+    .map(
+      (c) =>
+        `<option value="${escapeHtml(c)}" ${
+          c === initial.category ? "selected" : ""
+        }>${escapeHtml(c)}</option>`
+    )
+    .join("")}
+</select>
     <input id="price" type="number" placeholder="Price" min="0" required class="border px-2 py-1 rounded" value="${escapeHtml(initial.price)}">
     <input id="dutyRate" type="number" placeholder="Duty Rate (%)" min="0" max="100" required class="border px-2 py-1 rounded" value="${escapeHtml(initial.dutyRate)}">
     <select id="customsLiability" required class="border px-2 py-1 rounded">
@@ -304,18 +332,19 @@ dialog.querySelector("#addCatBtn").onclick = async () => {
         const isPublicAsset = dialog.querySelector('#isPublicAsset').checked;
       
         dialog.close();
-      resolve({
-        name,
-        vendor,
-        hsCode,
-        category,
-        price: Number(price),
-        dutyRate: Number(dutyRate),
-        customsLiability,
-        depreciationRate: Number(depreciationRate),
-        description,
-        isPublicAsset // <-- add here
-      });
+        resolve({
+          name,
+          vendor,
+          hsCode,
+          category,
+          price: price === "" ? null : Number(price),
+          dutyRate: Number(dutyRate),
+          customsLiability,
+          depreciationRate: Number(depreciationRate),
+          description,
+          isPublicAsset,
+          id: product && product.id ? product.id : undefined // <-- add this line
+        });
     };     
     });     
 }
@@ -346,8 +375,7 @@ async function addProduct(prod) {
   if (!prod) return;
   products = await loadProducts();
   prod.order = products.length > 0 ? Math.max(...products.map(p => p.order)) + 1 : 0;
-  products.push(prod);
-  await saveProducts(products);
+  await saveProduct(prod);
   showToast("Product added", "green");
   await renderProductsGrid();
   renderPagination();
@@ -355,30 +383,32 @@ async function addProduct(prod) {
 
 async function editProduct(prod, idx) {
   if (!prod) return;
-  products = await loadProducts();
-  Object.assign(products[idx], prod); // preserve order property
-  await saveProducts(products);
+  await updateProduct(prod.id, prod);
   showToast("Product updated", "blue");
   await renderProductsGrid();
 }
 
-async function deleteProduct(idx) {
-  products = await loadProducts();
-  products.splice(idx, 1);
-  await saveProducts(products);
+async function deleteProduct(prod) {
+  await deleteProductById(prod.id);
   showToast("Product deleted", "red");
   await renderProductsGrid();
   renderPagination();
 }
 
-async function reorderProducts(fromIdx, toIdx) {
+async function reorderProductsByIndex(fromIdx, toIdx) {
   products = await loadProducts();
   products.sort((a, b) => a.order - b.order);
   const [moved] = products.splice(fromIdx, 1);
   products.splice(toIdx, 0, moved);
-  products.forEach((p, i) => p.order = i);
-  await saveProducts(products);
+
+  const batch = writeBatch(db);
+  products.forEach((p, i) => {
+    batch.update(doc(db, "Products", p.id), { order: i });
+  });
+  await batch.commit();
+
   await renderProductsGrid();
+  renderPagination();
 }
 
 function showAddCategoryDialog(existingCategories = []) {

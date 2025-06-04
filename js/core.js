@@ -484,40 +484,53 @@ function setupSidebarToggle() {
 
 // Now this will work!
 document.addEventListener('DOMContentLoaded', () => {
-  onUserAuthStateChanged(async (user) => {
-    if (!user) {
+  onUserAuthStateChanged(async (authUser) => {
+    if (!authUser) {
       if (!window.location.pathname.endsWith('/login.html')) {
         window.location.replace("/login.html");
       }
       return;
     }
-    // User is authenticated
-    await injectShell();
-    setupUserHeaderEvents();
-
-  // User info and logout
-  const userInfoDiv = document.getElementById('currentUserInfo');
-  const logoutBtn = document.getElementById('logoutBtn');
-  const manageUsersBtn = document.getElementById('manageUsersBtn');
-
-  if (user && userInfoDiv && logoutBtn) {
-    userInfoDiv.textContent = `User: ${user.username} (${user.role})`;
-    logoutBtn.onclick = function() {
-      console.log("Logout clicked");
-      logout();
+    // Fetch Firestore user profile
+    const userProfile = await getCurrentUserProfile();
+    if (!userProfile) {
+      showToast("User profile not found.", "red");
+      await logout();
       window.location.replace("/login.html");
-    };
-  }
+      return;
+    }
+  
+    await injectShell();
+    setupUserHeaderEvents(userProfile);
+  
+    // User info and logout
+    const userInfoDiv = document.getElementById('currentUserInfo');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const manageUsersBtn = document.getElementById('manageUsersBtn');
+  
+    if (userInfoDiv && logoutBtn) {
+      userInfoDiv.textContent = `User: ${userProfile.username} (${userProfile.role})`;
+      logoutBtn.onclick = function() {
+        logout();
+        window.location.replace("/login.html");
+      };
+    }
+  
+    // Show Manage Users button only for SuperAdmin
+    if (manageUsersBtn) {
+      if (userProfile.role === 'SuperAdmin') {
+        manageUsersBtn.classList.remove('hidden');
+        manageUsersBtn.onclick = showUserManagementModal;
+      } else {
+        manageUsersBtn.classList.add('hidden');
+        manageUsersBtn.onclick = null;
+      }
+    }
+  
+    setupDarkModeToggle();
+    highlightActiveNav();
+    setupSidebarToggle();
 
-  // Show Manage Users button only for SuperAdmin
-  if (user && manageUsersBtn && user.role === 'SuperAdmin') {
-    manageUsersBtn.classList.remove('hidden');
-    manageUsersBtn.onclick = showUserManagementModal;
-  }
-
-  setupDarkModeToggle();
-  highlightActiveNav();
-  setupSidebarToggle();
 
   document.querySelectorAll('.nav-link').forEach(link => {
     link.addEventListener('click', function (e) {
@@ -816,12 +829,19 @@ if (shipmentBtn) {
 });
 
 export function showToast(message, color = "green") {
-  const toast = document.getElementById("toast");
+  let toast = document.getElementById("toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "toast";
+    document.body.appendChild(toast);
+  }
   toast.textContent = message;
   toast.className = `fixed bottom-6 right-6 z-50 min-w-[200px] max-w-xs bg-${color}-600 text-white font-semibold px-4 py-2 rounded shadow-lg opacity-100 pointer-events-auto transition-opacity duration-300`;
+  toast.style.display = "block";
   setTimeout(() => {
     toast.classList.remove("opacity-100", "pointer-events-auto");
     toast.classList.add("opacity-0", "pointer-events-none");
+    toast.style.display = "none";
   }, 2000);
 }
 

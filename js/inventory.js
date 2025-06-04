@@ -2,11 +2,13 @@
 
 import { showToast } from './core.js';
 import { allowedStatusesByLocation, loadSettings } from './settings.js';
-import { getCurrentUser } from './utils/users.js';
+import { getCurrentUser, getCurrentUserEmail } from './utils/users.js';
 import Quagga from 'quagga';
 import * as XLSX from 'xlsx';
 import { db } from './utils/firebase.js';
 import { collection, getDocs, doc, setDoc, deleteDoc, writeBatch, orderBy, query } from "firebase/firestore";
+
+let currentLayoutMode = window.innerWidth < 640 ? 'mobile' : 'desktop';
 
 // 1) Load entire inventory from Firestore
 export async function loadInventory() {
@@ -36,7 +38,7 @@ export async function saveInventory(list) {
         status: unit.status,
         assigned: unit.assigned || false,
         created: unit.created || new Date().toISOString(),
-        addedBy: unit.addedBy || getCurrentUser(),
+        addedBy: unit.addedBy || getCurrentUserEmail(),
         lastAction: unit.lastAction || new Date().toISOString(),
         notes: unit.notes || "",
         ...(unit.isAsset !== undefined && { isAsset: unit.isAsset }),
@@ -147,8 +149,8 @@ function getLocationColor(loc) {
     return false;
   }
 
-  function getAllLocationsWithContractors() {
-    const settings = loadSettings();
+  async function getAllLocationsWithContractors() {
+    const settings = await loadSettings();
     const contractorLocations = (settings.contractors || []).map(c => ({
       name: c.name,
       parent: "Contractor/Technician",
@@ -194,8 +196,8 @@ function attachHoverLegend(btn, text) {
 let inventory = [];
 
 
-window.openBulkAddDialog = function() {
-    const settings = loadSettings();
+window.openBulkAddDialog = async function() {
+    const settings = await loadSettings();
     const dialog = document.getElementById('actionDialog');
     dialog.innerHTML = `
       <form method="dialog" class="flex flex-col gap-3 w-full sm:w-[32rem] max-w-2xl">
@@ -249,7 +251,7 @@ window.openBulkAddDialog = function() {
           status: defaultStatus,
           assigned: false,
           created: new Date().toISOString(),
-          addedBy: getCurrentUser(),
+          addedBy: getCurrentUserEmail(),
           lastAction: new Date().toISOString(),
           notes: ""
         });
@@ -376,7 +378,7 @@ await saveAuditLog(log);
     <dialog id="shipmentDialog" class="rounded-xl p-4"></dialog>
     <dialog id="globalSearchDialog" class="rounded-xl p-4"></dialog>
   `;
-    document.body.insertAdjacentHTML('beforeend', fabHTML);
+  document.body.insertAdjacentHTML('beforeend', fabHTML);
 
   document.getElementById("addItemBtn").onclick = showAddItemDialog;
   document.getElementById("bulkAddBtn").onclick = openBulkAddDialog;
@@ -494,12 +496,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   main.querySelector('#downloadCSV').onclick = () => downloadInventoryCSV();
   main.querySelector('#downloadExcel').onclick = () => downloadInventoryExcel();
 
+  injectInventoryFABs();
+
   renderTableRows();
 
   }
 
   window.addEventListener('resize', () => {
-    if (document.body.dataset.page === "inventory") {
+    const newMode = window.innerWidth < 640 ? 'mobile' : 'desktop';
+    if (newMode !== currentLayoutMode) {
+      currentLayoutMode = newMode;
       injectInventoryFABs();
       renderInventoryTable(document.getElementById('main-content'));
     }
@@ -910,7 +916,7 @@ function addMobileSwipeHandlers() {
     if (!selected.length) return;
   
     const dialog = document.getElementById('actionDialog');
-    const locations = getAllLocationsWithContractors();
+    const locations = await getAllLocationsWithContractors();
     const contractorLocations = (locations || []).filter(l => l.parent === "Contractor/Technician");
     const installedLocations = ["Customer Stock", "Public Network Stock"];
     const currentLocation = selected[0]?.location;
@@ -935,7 +941,7 @@ function addMobileSwipeHandlers() {
       ).join("");
     }
   
-    const settings = loadSettings();
+    const settings = await loadSettings();
   
     dialog.innerHTML = `
   <form method="dialog" class="flex flex-col gap-4 w-full sm:w-[40rem] max-w-3xl">
@@ -1049,7 +1055,7 @@ function addMobileSwipeHandlers() {
   
     const dialog = document.getElementById('actionDialog');
     // Only show statuses not currently assigned to all selected
-    const statuses = (loadSettings().statuses || []);
+    const statuses = (await loadSettings()).statuses || [];
     let statusOptions = statuses
     .filter(s => !selected.every(i => i.status === s))
     .map(s => `<option value="${s}">${s}</option>`).join("");
@@ -1260,12 +1266,13 @@ window.toggleActionsMenu = function(idx) {
   };
   
   function isAdmin() {
-    // Update with your actual user logic. For now, always returns true.
-    return getCurrentUser() === "Admin";
-  }   
+    // Replace with your actual admin email(s) or UID(s)
+    const adminEmails = ["admin@email.com"];
+    return adminEmails.includes(getCurrentUserEmail());
+  } 
 
-  function getAllowedMoveDestinations(currentLocation) {
-    const settings = loadSettings();
+  async function getAllowedMoveDestinations(currentLocation) {
+    const settings = await loadSettings();
     const locations = settings.locations;
     const current = locations.find(l => l.name === currentLocation);
     if (!current) return [];
@@ -1298,9 +1305,9 @@ window.toggleActionsMenu = function(idx) {
   }
   
   // Update openMoveDialog to use getAllowedMoveDestinations:
-  window.openMoveDialog = function(unit) {
+  window.openMoveDialog = async function(unit) {
     const dialog = document.getElementById('actionDialog');
-    const settings = loadSettings();
+    const settings = await loadSettings();
   
     // Unified locations list: add contractors as locations
     function getAllLocationsWithContractors(settings) {
@@ -1440,14 +1447,14 @@ window.toggleActionsMenu = function(idx) {
   function isInstalled(loc) {
     return /installed|customer/i.test(loc);
   }
-  function getContractorLocations() {
-    const settings = loadSettings();
+  async function getContractorLocations() {
+    const settings = await loadSettings();
     return settings.locations.filter(loc => loc.parent === "Technician/Contractor");
   }
   
-  function getContractorContactInfo(locationName) {
+  async function getContractorContactInfo(locationName) {
     // Try to match the name within the contractor's assigned location string
-    const settings = loadSettings();
+    const settings = await loadSettings();
     if (!settings.contractors) return "";
     const contractor = settings.contractors.find(
       c => locationName.toLowerCase().includes(c.name.toLowerCase())
@@ -1457,9 +1464,9 @@ window.toggleActionsMenu = function(idx) {
   
   
   // 2. Assign Contractor Dialog: Use real contractor list from settings and store contractorId
-  window.openAssignContractorDialog = function(unit) {
+  window.openAssignContractorDialog = async function(unit) {
     const dialog = document.getElementById('actionDialog');
-    const contractors = loadSettings().contractors || [];
+    const contractors = (await loadSettings()).contractors || [];
     dialog.innerHTML = `
       <form method="dialog" class="flex flex-col gap-3 w-80">
         <h3 class="font-bold mb-2">Assign Unit ${unit.chargerId} to Contractor</h3>
@@ -1526,11 +1533,11 @@ window.toggleActionsMenu = function(idx) {
     };
   };
 
-  window.openEditDialog = function(unit) {
+  window.openEditDialog = async function(unit) {
     const dialog = document.getElementById('actionDialog');
     // Use canonical settings
-    const locations = getAllLocationsWithContractors();
-    const statusOptions = loadSettings().statuses;
+    const locations = await getAllLocationsWithContractors();
+    const statusOptions = (await loadSettings()).statuses;
   
     dialog.innerHTML = `
       <form method="dialog" class="flex flex-col gap-3 w-80">
@@ -1694,7 +1701,7 @@ window.toggleActionsMenu = function(idx) {
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   }
   export async function loadProducts() {
-    const snapshot = await window.db.collection('products').get();
+    const snapshot = await getDocs(collection(db, "Products"));
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   }
   
@@ -1810,11 +1817,11 @@ window.toggleActionsMenu = function(idx) {
     // Load products from Firestore
     const productsData = await loadProducts();
     const products = productsData.length
-      ? productsData.map(p => p.name)
-      : [...new Set(inventory.map(i => i.product))];
+  ? productsData
+  : inventory.map(i => ({ name: i.product }));
   
-    const locations = getAllLocationsWithContractors();
-    const statusOptions = loadSettings().statuses;
+      const locations = await getAllLocationsWithContractors();
+      const statusOptions = (await loadSettings()).statuses;
   
     dialog.innerHTML = `
       <form method="dialog" class="flex flex-col gap-3 w-80">
@@ -1828,7 +1835,9 @@ window.toggleActionsMenu = function(idx) {
         <input id="simNumber" type="text" placeholder="SIM Number (Optional)" class="border px-2 py-1 rounded">
         <select id="product" required class="border px-2 py-1 rounded">
           <option value="">-- Select Product --</option>
-          ${(products || []).map(p => `<option value="${p}">${p}</option>`).join("")}
+          ${(products || []).map(p =>
+            `<option value="${p.name}">${p.name}${p.vendor ? ' (' + p.vendor + ')' : ''}</option>`
+          ).join("")}
         </select>
         <input id="model" type="text" placeholder="Model (Optional)" class="border px-2 py-1 rounded">
         <select id="location" required class="border px-2 py-1 rounded">
@@ -1932,7 +1941,7 @@ if (scanBtn) {
       status,
       assigned: status === "Installed",
       created: new Date().toISOString(),
-      addedBy: getCurrentUser(),
+      addedBy: getCurrentUserEmail(),
       lastAction: new Date().toISOString(),
       notes,
       isAsset: (status === "Installed" && privPub === "Public"),
@@ -1948,10 +1957,10 @@ if (scanBtn) {
     renderInventoryTable(document.getElementById('main-content'));
   };
 }
-window.openStatusDialog = function(unit) {
+window.openStatusDialog = async function(unit) {
   const dialog = document.getElementById('actionDialog');
   // Always get the latest statuses from settings
-  const statusOptions = loadSettings().statuses;
+  const statusOptions = await loadSettings().statuses;
   dialog.innerHTML = `
     <form method="dialog" class="flex flex-col gap-3 w-80">
       <h3 class="font-bold mb-2">Change Status: ${unit.chargerId}</h3>
