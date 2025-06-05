@@ -73,7 +73,8 @@ async function initializeIndexPageContent() {
   const kpis = [
     { label: "Public Chargers", value: publicCount, value2: `$${publicValue.toLocaleString()}` },
     { label: "Inventory Chargers", value: inventoryCount, value2: `$${inventoryValue.toLocaleString()}` },
-    { label: "Total Chargers", value: publicCount + inventoryCount, value2: "" }
+    { label: "Unknown Chargers", value: unknownCount, value2: "" },
+    { label: "Total Chargers", value: inventory.length, value2: "" }
   ].map((kpi, i) => ({ ...kpi, color: rainbowColors[i % rainbowColors.length] }));
 
   function renderKpiCards() {

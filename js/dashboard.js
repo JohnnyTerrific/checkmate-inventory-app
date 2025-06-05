@@ -479,13 +479,14 @@ function renderLocationBar(locStats, inventory) {
   });
 }
 
-function showChargerListForStatus(status) {
+async function showChargerListForStatus(status) {
   const dialog = document.getElementById('chargerListDialog') || document.createElement('dialog');
   dialog.id = 'chargerListDialog';
   dialog.className = 'rounded-xl p-5';
   if (!dialog.parentElement) document.body.appendChild(dialog);
 
-  const chargers = loadInventory().filter(i => i.status === status);
+  const inventory = await loadInventory();
+  const chargers = inventory.filter(i => i.status === status);
   dialog.innerHTML = `
     <div class="text-xl font-bold mb-2 text-purple-700 dark:text-purple-300">${chargers.length} Chargers with "${status}"</div>
     <div class="overflow-auto" style="max-height:350px">

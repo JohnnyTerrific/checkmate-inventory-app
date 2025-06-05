@@ -1,4 +1,4 @@
-import"./users-Bd9OzKj5.js";import{c as g}from"./inventory-BpRzdKTg.js";document.addEventListener("DOMContentLoaded",()=>{h()});async function h(){const b=(await g()||[]).reverse(),s=document.getElementById("auditTableContainer");let a=1,n=25,i=b;s.innerHTML=`
+import"./users-BmXr6znz.js";import{c as g}from"./inventory-D5gaGQmU.js";document.addEventListener("DOMContentLoaded",()=>{h()});async function h(){const b=(await g()||[]).reverse(),s=document.getElementById("auditTableContainer");let a=1,n=25,i=b;s.innerHTML=`
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
             <div class="flex gap-2 flex-1">
             <input id="auditSearch" type="text" placeholder="Search by Charger ID, Action, User..." 

@@ -6,7 +6,7 @@ import { getCurrentUser, getCurrentUserEmail } from './utils/users.js';
 import Quagga from 'quagga';
 import * as XLSX from 'xlsx';
 import { db } from './utils/firebase.js';
-import { collection, getDocs, doc, setDoc, deleteDoc, writeBatch, orderBy, query } from "firebase/firestore";
+import { collection, getDocs, doc, setDoc, deleteDoc, writeBatch, orderBy, query, onSnapshot } from "firebase/firestore";
 
 let currentLayoutMode = window.innerWidth < 640 ? 'mobile' : 'desktop';
 
@@ -50,6 +50,14 @@ export async function saveInventory(list) {
     await batch.commit();
   }
 
+  function listenToInventoryUpdates() {
+    const colRef = collection(db, "inventory");
+    onSnapshot(colRef, (snapshot) => {
+      inventory = snapshot.docs.map(doc => ({ chargerId: doc.id, ...doc.data() }));
+      renderInventoryTable(document.getElementById('main-content'));
+    });
+  }
+
 // 3) Load entire audit log from Firestore
 export async function loadAuditLog() {
   const snapshot = await window.db.collection('auditLog').orderBy('date', 'asc').get();
@@ -58,19 +66,11 @@ export async function loadAuditLog() {
 }
 
 // 4) Save (append) an array of audit entries into Firestore
-export async function saveAuditLog(list) {
+export async function saveAuditLog(newEntries) {
   const batch = window.db.batch();
   const colRef = window.db.collection('auditLog');
 
-  // Approach: Delete all existing audit documents, then re‐write entire list
-  // (If you prefer incremental writes, you can refactor to only add new entries.)
-  const existing = await colRef.get();
-  existing.docs.forEach(docSnap => {
-    batch.delete(colRef.doc(docSnap.id));
-  });
-
-  list.forEach(entry => {
-    // Use auto‐ID for each log entry
+  newEntries.forEach(entry => {
     batch.set(colRef.doc(), {
       date: entry.date,
       action: entry.action,
@@ -195,6 +195,9 @@ function attachHoverLegend(btn, text) {
 // UI State
 let inventory = [];
 
+let cachedProducts = null;
+let cachedLocations = null;
+
 
 window.openBulkAddDialog = async function() {
     const settings = await loadSettings();
@@ -224,11 +227,16 @@ window.openBulkAddDialog = async function() {
       </form>
     `;
     dialog.showModal();
+
+    scanDialog.addEventListener('click', function(e) {
+      if (e.target === scanDialog) scanDialog.close();
+    });
   
     dialog.querySelector('button[value="cancel"]').onclick = e => { e.preventDefault(); dialog.close(); };
   
     dialog.querySelector('form').onsubmit = async e => {
       e.preventDefault();
+      dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
       const rows = dialog.querySelector("#bulkText").value.trim().split("\n");
       const defaultLocation = dialog.querySelector("#bulkLocation").value;
       const defaultStatus = dialog.querySelector("#bulkStatus").value;
@@ -395,14 +403,13 @@ await saveAuditLog(log);
 // Initial load
 document.addEventListener('DOMContentLoaded', async () => {
   if (document.body.dataset.page === "inventory") {
+    injectInventoryFABs();
     if (window.innerWidth >= 640) {
-      injectInventoryFABs();
     }
     const addItemBtn = document.getElementById("addItemBtn");
     const bulkAddBtn = document.getElementById("bulkAddBtn");
     const addShipmentBtn = document.getElementById("addShipmentBtn");
-    inventory = await loadInventory();
-    renderInventoryTable(document.getElementById('main-content'));
+    listenToInventoryUpdates();
     if (addItemBtn) addItemBtn.onclick = showAddItemDialog;
     if (bulkAddBtn) bulkAddBtn.onclick = openBulkAddDialog;
     if (addShipmentBtn) addShipmentBtn.onclick = openCreateShipmentDialog;
@@ -480,6 +487,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Search/filter listeners
   main.querySelector('#searchInput').oninput = () => {
+    console.log('Inventory length:', inventory.length);
     window.inventoryPage = 1;
     renderTableRows();
   };
@@ -628,23 +636,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   
     // Select All logic (only for visible page)
     const selectAll = main.querySelector('#selectAll');
-    if (selectAll) {
-      selectAll.checked = paginated.length > 0 && paginated.every(unit => window.selectedUnits.includes(unit.chargerId));
-      selectAll.indeterminate = paginated.some(unit => window.selectedUnits.includes(unit.chargerId)) && !selectAll.checked;
-      selectAll.onchange = (e) => {
-        if (e.target.checked) {
-          paginated.forEach(unit => {
-            if (!window.selectedUnits.includes(unit.chargerId)) {
-              window.selectedUnits.push(unit.chargerId);
-            }
-          });
-        } else {
-          window.selectedUnits = window.selectedUnits.filter(id => !paginated.some(u => u.chargerId === id));
+if (selectAll) {
+  selectAll.checked = paginated.length > 0 && paginated.every(unit => window.selectedUnits.includes(unit.chargerId));
+  selectAll.indeterminate = paginated.some(unit => window.selectedUnits.includes(unit.chargerId)) && !selectAll.checked;
+  selectAll.onchange = (e) => {
+    if (e.target.checked) {
+      paginated.forEach(unit => {
+        if (!window.selectedUnits.includes(unit.chargerId)) {
+          window.selectedUnits.push(unit.chargerId);
         }
-        renderTableRows(); // re-render to update checked
-        renderBulkActionBar();
-      };
+      });
+    } else {
+      window.selectedUnits = window.selectedUnits.filter(id => !paginated.some(u => u.chargerId === id));
     }
+    renderTableRows(); // re-render to update checked
+    renderBulkActionBar();
+  };
+}
   
     // Pagination controls
     const paginationBar = main.querySelector('#paginationBar');
@@ -965,6 +973,10 @@ function addMobileSwipeHandlers() {
   </form>
   `;
     dialog.showModal();
+
+    dialog.addEventListener('click', function(e) {
+      if (e.target === dialog) dialog.close();
+    });
   
     dialog.querySelector('button[value="cancel"]').onclick = e => {
       e.preventDefault();
@@ -975,14 +987,15 @@ function addMobileSwipeHandlers() {
       e.preventDefault();
       const moveLoc = dialog.querySelector("#moveLoc").value.trim();
       const moveStatus = dialog.querySelector("#moveStatus").value.trim();
+      const moveComment = dialog.querySelector("#moveComment").value.trim();
       const contractorLocationsNames = (contractorLocations || []).map(l => l.name);
-  
+    
       if (!moveLoc) {
         dialog.querySelector("#moveLoc").classList.add('border-red-500');
         dialog.querySelector("#formError").textContent = "Select a location.";
         return;
       }
-  
+    
       if (
         (isStorage(currentLocation) || installedLocations.includes(currentLocation)) &&
         !contractorLocationsNames.includes(moveLoc)
@@ -991,7 +1004,7 @@ function addMobileSwipeHandlers() {
           "You can only move units from warehouse/installed to a Contractor/Technician location.";
         return;
       }
-  
+    
       const cannotMove = selected.filter(unit =>
         unit.location.startsWith("Back Warehouse") && !unit.chargerSerial && !moveLoc.startsWith("Back Warehouse")
       );
@@ -1000,7 +1013,9 @@ function addMobileSwipeHandlers() {
           `Cannot move ${cannotMove.length} unit(s) without serial out of warehouse.`;
         return;
       }
-  
+    
+      dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
+    
       let items = await loadInventory();
       const prevStates = [];
       selected.forEach(unit => {
@@ -1010,11 +1025,11 @@ function addMobileSwipeHandlers() {
           items[idx].location = moveLoc;
           if (moveStatus) items[idx].status = moveStatus;
           items[idx].lastAction = new Date().toISOString();
-          items[idx].notes = dialog.querySelector("#moveComment").value.trim();
+          items[idx].notes = moveComment;
         }
       });
       await saveInventory(items);
-  
+    
       const log = await loadAuditLog();
       selected.forEach(unit => {
         log.push({
@@ -1028,23 +1043,23 @@ function addMobileSwipeHandlers() {
           to: moveLoc,
           statusFrom: unit.status,
           statusTo: moveStatus || unit.status,
-          user: getCurrentUser(),
-          comment: dialog.querySelector("#moveComment").value.trim()
+          user: getCurrentUserEmail(),
+          comment: moveComment
         });
       });
       await saveAuditLog(log);
-  
+    
       showUndoToast("Units moved", "blue", () => {
         saveInventory(restoreItems(items, prevStates));
         showToast("Bulk move undone", "red");
-        inventory = loadInventory();
         window.selectedUnits = [];
+        inventory = loadInventory();
         renderInventoryTable(document.getElementById('main-content'));
       });
-  
+    
       dialog.close();
-      inventory = items;
       window.selectedUnits = [];
+      inventory = items;
       renderInventoryTable(document.getElementById('main-content'));
     };
   };
@@ -1086,6 +1101,10 @@ function addMobileSwipeHandlers() {
       </form>
     `;
     dialog.showModal();
+
+    dialog.addEventListener('click', function(e) {
+      if (e.target === dialog) dialog.close();
+    });
   
     dialog.querySelector('button[value="cancel"]').onclick = e => {
       e.preventDefault();
@@ -1109,6 +1128,12 @@ function addMobileSwipeHandlers() {
     dialog.querySelector('form').onsubmit = async e => {
       e.preventDefault();
       const newStatus = dialog.querySelector("#newStatus").value.trim();
+      if (!newStatus) {
+        dialog.querySelector("#newStatus").classList.add('border-red-500');
+        dialog.querySelector("#formError").textContent = "Please select a status.";
+        return;
+      }
+      dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
       let valid = !!newStatus;
       dialog.querySelector("#formError").textContent = "";
       if (newStatus === "Installed" && !dialog.querySelector("#privatePublic").value) {
@@ -1150,7 +1175,7 @@ function addMobileSwipeHandlers() {
           to: items.find(i => i.chargerId === unit.chargerId)?.location || unit.location,
           statusFrom: unit.status,
           statusTo: newStatus,
-          user: getCurrentUser(),
+          user: getCurrentUserEmail(),
           comment: dialog.querySelector("#statusComment").value.trim()
         });
       });
@@ -1161,13 +1186,13 @@ function addMobileSwipeHandlers() {
         saveInventory(restoreItems(items, prevStates));
         showToast("Bulk status undo", "red");
         inventory = loadInventory();
-        window.selectedUnits = [];
         renderInventoryTable(document.getElementById('main-content'));
+        window.selectedUnits = [];
       });
   
       dialog.close();
-      inventory = items;
       window.selectedUnits = [];
+      inventory = items;
       renderInventoryTable(document.getElementById('main-content'));
     };
   };   
@@ -1237,6 +1262,10 @@ window.toggleActionsMenu = function(idx) {
       </div>
     `;
     dialog.showModal();
+
+    dialog.addEventListener('click', function(e) {
+      if (e.target === dialog) dialog.close();
+    });
   };
   
   window.deleteUnit = async function(chargerId) {
@@ -1253,6 +1282,11 @@ window.toggleActionsMenu = function(idx) {
       </div>
     `;
     dialog.showModal();
+
+    dialog.addEventListener('click', function(e) {
+      if (e.target === dialog) dialog.close();
+    });
+
     dialog.querySelector('button[value="cancel"]').onclick = e => { e.preventDefault(); dialog.close(); };
     dialog.querySelector('button[value="ok"]').onclick = async e => {
       let items = await loadInventory();
@@ -1267,7 +1301,7 @@ window.toggleActionsMenu = function(idx) {
   
   function isAdmin() {
     // Replace with your actual admin email(s) or UID(s)
-    const adminEmails = ["admin@email.com"];
+    const adminEmails = ["johnny.n@enova-energy.co.il"];
     return adminEmails.includes(getCurrentUserEmail());
   } 
 
@@ -1307,22 +1341,13 @@ window.toggleActionsMenu = function(idx) {
   // Update openMoveDialog to use getAllowedMoveDestinations:
   window.openMoveDialog = async function(unit) {
     const dialog = document.getElementById('actionDialog');
+    // Show loading spinner immediately
+    dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Loading...</div>`;
+    dialog.showModal();
+  
+    // Await settings and locations
     const settings = await loadSettings();
-  
-    // Unified locations list: add contractors as locations
-    function getAllLocationsWithContractors(settings) {
-      const contractorLocations = (settings.contractors || []).map(c => ({
-        name: c.name,
-        parent: "Contractor/Technician",
-        isContractor: true,
-        company: c.company,
-        phone: c.phone,
-        id: c.id,
-      }));
-      return [...(settings.locations || []), ...contractorLocations];
-    }
-  
-    const locations = getAllLocationsWithContractors(settings);
+    const locations = await getAllLocationsWithContractors();
     const contractorLocations = locations.filter(l => l.parent === "Contractor/Technician");
     const installedLocations = ["Customer Stock", "Public Network Stock"];
     let options = "";
@@ -1348,27 +1373,29 @@ window.toggleActionsMenu = function(idx) {
     }
   
     dialog.innerHTML = `
-    <form method="dialog" class="flex flex-col gap-3 w-80">
-      <h3 class="font-bold mb-2">Move Unit ${unit.chargerId}</h3>
-      <div class="text-red-600 text-xs min-h-[1em]" id="formError"></div>
-      <label>Move to location:</label>
-      <select id="moveLoc" class="border px-2 py-1 rounded">
-        <option value="">-- Keep Current Location --</option>
-        ${options}
-      </select>
-      <label>Set status (optional):</label>
-      <select id="moveStatus" class="border px-2 py-1 rounded">
-        <option value="">-- Keep Current Status --</option>
-        ${(settings.statuses || []).map(s => `<option value="${s}"${unit.status === s ? " selected" : ""}>${s}</option>`).join("")}
-      </select>
-      <textarea id="moveComment" placeholder="Comment (optional)" class="border px-2 py-1 rounded"></textarea>
-      <div class="flex justify-between gap-2 mt-3">
-        <button type="button" value="cancel" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
-        <button value="ok" class="bg-purple-600 text-white px-3 py-1 rounded">Move</button>
-      </div>
-    </form>
+      <form method="dialog" class="flex flex-col gap-3 w-80">
+        <h3 class="font-bold mb-2">Move Unit ${unit.chargerId}</h3>
+        <div class="text-red-600 text-xs min-h-[1em]" id="formError"></div>
+        <label>Move to location:</label>
+        <select id="moveLoc" class="border px-2 py-1 rounded">
+          <option value="">-- Keep Current Location --</option>
+          ${options}
+        </select>
+        <label>Set status (optional):</label>
+        <select id="moveStatus" class="border px-2 py-1 rounded">
+          <option value="">-- Keep Current Status --</option>
+          ${(settings.statuses || []).map(s => `<option value="${s}"${unit.status === s ? " selected" : ""}>${s}</option>`).join("")}
+        </select>
+        <textarea id="moveComment" placeholder="Comment (optional)" class="border px-2 py-1 rounded"></textarea>
+        <div class="flex justify-between gap-2 mt-3">
+          <button type="button" value="cancel" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
+          <button value="ok" class="bg-purple-600 text-white px-3 py-1 rounded">Move</button>
+        </div>
+      </form>
     `;
-    dialog.showModal();
+    dialog.addEventListener('click', function(e) {
+      if (e.target === dialog) dialog.close();
+    });
   
     dialog.querySelector('button[value="cancel"]').onclick = e => {
       e.preventDefault();
@@ -1379,42 +1406,44 @@ window.toggleActionsMenu = function(idx) {
       e.preventDefault();
       const moveLoc = dialog.querySelector("#moveLoc").value.trim();
       const moveStatus = dialog.querySelector("#moveStatus").value.trim();
+      const moveComment = dialog.querySelector("#moveComment").value.trim();
+    
+      // Define your key locations
       const contractorLocationsNames = (contractorLocations || []).map(l => l.name);
-  
-      if (!moveLoc) {
-        dialog.querySelector("#moveLoc").classList.add('border-red-500');
-        dialog.querySelector("#formError").textContent = "Select a location.";
+      const installedLocations = ["Customer Stock", "Public Network Stock"];
+      const fromLoc = unit.location;
+      const toLoc = moveLoc;
+    
+      // Enforce: must go through contractor when moving to or from installed locations
+      const isFromInstalled = installedLocations.includes(fromLoc);
+      const isToInstalled = installedLocations.includes(toLoc);
+      const isFromContractor = contractorLocationsNames.includes(fromLoc);
+      const isToContractor = contractorLocationsNames.includes(toLoc);
+    
+      // Moving to installed location, must come from contractor
+      if (isToInstalled && !isFromContractor) {
+        showToast("To move a unit to Customer Stock or Public Network Stock, it must first go through a contractor/technician.", "red");
         return;
       }
-      if (!moveStatus) {
-        dialog.querySelector("#moveStatus").classList.add('border-red-500');
-        dialog.querySelector("#formError").textContent = "Select a status.";
+      // Moving out of installed location, must go to contractor
+      if (isFromInstalled && !isToContractor) {
+        showToast("To move a unit out of Customer Stock or Public Network Stock, it must first go through a contractor/technician.", "red");
         return;
       }
-  
-      if (
-        (isStorage(unit.location) || installedLocations.includes(unit.location)) &&
-        !contractorLocationsNames.includes(moveLoc)
-      ) {
-        dialog.querySelector("#formError").textContent =
-          "You can only move units from warehouse/installed to a Contractor/Technician location.";
-        return;
-      }
-  
-      if (isStorage(unit.location) && !unit.chargerSerial && !isStorage(moveLoc)) {
-        dialog.querySelector("#formError").textContent = "Cannot move unit without serial out of warehouse.";
-        return;
-      }
+    
+      // ...existing validation and move logic...
+      dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
+    
       let items = await loadInventory();
       const idx = items.findIndex(i => i.chargerId === unit.chargerId);
       if (idx >= 0) {
         items[idx].location = moveLoc;
-        items[idx].status = moveStatus;
+        if (moveStatus) items[idx].status = moveStatus;
         items[idx].lastAction = new Date().toISOString();
-        items[idx].notes = dialog.querySelector("#moveComment").value.trim();
+        items[idx].notes = moveComment;
       }
       await saveInventory(items);
-      const log = loadAuditLog();
+      const log = await loadAuditLog();
       log.push({
         date: new Date().toISOString(),
         action: "Move",
@@ -1425,18 +1454,18 @@ window.toggleActionsMenu = function(idx) {
         from: unit.location,
         to: moveLoc,
         statusFrom: unit.status,
-        statusTo: moveStatus,
-        user: getCurrentUser(),
-        comment: dialog.querySelector("#moveComment").value.trim()
+        statusTo: moveStatus || unit.status,
+        user: getCurrentUserEmail(),
+        comment: moveComment
       });
-      saveAuditLog(log);
+      await saveAuditLog(log);
       showToast("Unit moved", "blue");
       dialog.close();
       inventory = items;
       renderInventoryTable(document.getElementById('main-content'));
     };
   };
-  
+
 
 
   // Helper functions for hierarchy logic
@@ -1483,54 +1512,64 @@ window.toggleActionsMenu = function(idx) {
       </form>
     `;
     dialog.showModal();
+
+    dialog.addEventListener('click', function(e) {
+      if (e.target === dialog) dialog.close();
+    });
+
     dialog.querySelector('button[value="cancel"]').onclick = e => {
       e.preventDefault();
       dialog.close();
     };
+
     dialog.querySelector('form').onsubmit = async e => {
-      e.preventDefault();
-      const contractorId = dialog.querySelector('#contractor').value.trim();
-      if (!contractorId) {
-        dialog.querySelector('#formError').textContent = 'Select a contractor.';
-        return;
-      }
-      const contractor = contractors.find(c => c.id === contractorId);
-      if (!contractor) {
-        dialog.querySelector('#formError').textContent = 'Contractor not found.';
-        return;
-      }
-      let items = await loadInventory();
-      const idx = items.findIndex(i => i.chargerId === unit.chargerId);
-      if (idx >= 0) {
-        items[idx].location = contractor.name; // Use canonical contractor location name
-        items[idx].contractorId = contractor.id;
-        items[idx].status = 'Reserved';
-        items[idx].lastAction = new Date().toISOString();
-      }
-      await saveInventory(items);
-      const log = loadAuditLog();
-      log.push({
-        date: new Date().toISOString(),
-        action: 'Assign to Contractor',
-        chargerId: unit.chargerId,
-        chargerSerial: unit.chargerSerial,
-        simNumber: unit.simNumber,
-        product: unit.product,
-        from: unit.location,
-        to: `Assigned to ${contractor.name}`,
-        contractorId: contractor.id,
-        contractorName: contractor.name,
-        statusFrom: unit.status,
-        statusTo: 'Reserved',
-        user: getCurrentUser(),
-        comment: dialog.querySelector('#assignComment').value.trim()
-      });
-      saveAuditLog(log);
-      showToast('Unit assigned to contractor', 'blue');
-      dialog.close();
-      inventory = items;
-      renderInventoryTable(document.getElementById('main-content'));
-    };
+  e.preventDefault();
+  const contractorId = dialog.querySelector('#contractor').value.trim();
+  const assignComment = dialog.querySelector('#assignComment').value.trim();
+  if (!contractorId) {
+    dialog.querySelector('#formError').textContent = 'Select a contractor.';
+    return;
+  }
+  const contractor = contractors.find(c => c.id === contractorId);
+  if (!contractor) {
+    dialog.querySelector('#formError').textContent = 'Contractor not found.';
+    return;
+  }
+
+  dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
+
+  let items = await loadInventory();
+  const idx = items.findIndex(i => i.chargerId === unit.chargerId);
+  if (idx >= 0) {
+    items[idx].location = contractor.name;
+    items[idx].contractorId = contractor.id;
+    items[idx].status = 'Reserved';
+    items[idx].lastAction = new Date().toISOString();
+  }
+  await saveInventory(items);
+  const log = await loadAuditLog();
+  log.push({
+    date: new Date().toISOString(),
+    action: 'Assign to Contractor',
+    chargerId: unit.chargerId,
+    chargerSerial: unit.chargerSerial,
+    simNumber: unit.simNumber,
+    product: unit.product,
+    from: unit.location,
+    to: `Assigned to ${contractor.name}`,
+    contractorId: contractor.id,
+    contractorName: contractor.name,
+    statusFrom: unit.status,
+    statusTo: 'Reserved',
+    user: getCurrentUserEmail(),
+    comment: assignComment
+  });
+  await saveAuditLog(log);
+  showToast('Unit assigned to contractor', 'blue');
+  dialog.close();
+  inventory = items;
+  renderInventoryTable(document.getElementById('main-content'));
+};
   };
 
   window.openEditDialog = async function(unit) {
@@ -1595,6 +1634,10 @@ window.toggleActionsMenu = function(idx) {
     `;
   
     dialog.showModal();
+    
+    dialog.addEventListener('click', function(e) {
+      if (e.target === dialog) dialog.close();
+    });
   
     dialog.querySelector('button[value="cancel"]').onclick = e => {
       e.preventDefault();
@@ -1603,8 +1646,7 @@ window.toggleActionsMenu = function(idx) {
   
     dialog.querySelector('form').onsubmit = async e => {
       e.preventDefault();
-  
-      // Validation (minimal, since ID is not editable)
+    
       const chargerSerial = dialog.querySelector("#editChargerSerial").value.trim();
       const simNumber = dialog.querySelector("#editSimNumber").value.trim();
       const product = dialog.querySelector("#editProduct").value.trim();
@@ -1612,14 +1654,14 @@ window.toggleActionsMenu = function(idx) {
       const location = dialog.querySelector("#editLocation").value.trim() || unit.location;
       const status = dialog.querySelector("#editStatus").value.trim() || unit.status;
       const notes = dialog.querySelector("#editNotes").value.trim();
-
-    // No need to require a new location or status if unchanged
-    if (!location || !status) {
-    dialog.querySelector("#formError").textContent = "Location and status are required.";
-    return;
-    }
-  
-      // Update inventory
+    
+      if (!location || !status) {
+        dialog.querySelector("#formError").textContent = "Location and status are required.";
+        return;
+      }
+    
+      dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
+    
       let items = await loadInventory();
       const idx = items.findIndex(i => i.chargerId === unit.chargerId);
       if (idx < 0) {
@@ -1627,7 +1669,6 @@ window.toggleActionsMenu = function(idx) {
         dialog.close();
         return;
       }
-      // Save previous state for undo
       const prev = {...items[idx]};
       items[idx] = {
         ...items[idx],
@@ -1636,24 +1677,21 @@ window.toggleActionsMenu = function(idx) {
         lastAction: new Date().toISOString()
       };
       await saveInventory(items);
-  
-      // Audit log
+    
       const log = await loadAuditLog();
       log.push({
         date: new Date().toISOString(),
         action: "Edit Unit",
         chargerId: unit.chargerId,
-        user: getCurrentUser(),
+        user: getCurrentUserEmail(),
         changes: {
           from: prev,
           to: items[idx]
         }
       });
       await saveAuditLog(log);
-  
-      // Undo support
+    
       showUndoToast("Unit updated", "blue", async () => {
-        // Restore previous state
         items[idx] = prev;
         await saveInventory(items);
         showToast("Edit undone", "red");
@@ -1685,15 +1723,21 @@ window.toggleActionsMenu = function(idx) {
       </form>
     `;
     dialog.showModal();
+  
+    dialog.addEventListener('click', function(e) {
+      if (e.target === dialog) dialog.close();
+    });
+  
     dialog.querySelector('button[value="cancel"]').onclick = e => { 
       e.preventDefault(); dialog.close(); 
     };
+  
     const input = dialog.querySelector('#globalSearchInput');
     input.oninput = function () {
-      performGlobalSearch(input.value.trim());
+      window.performGlobalSearch(input.value.trim());
     };
     setTimeout(() => { input.focus(); }, 50);
-    performGlobalSearch('');
+    window.performGlobalSearch('');
   };
   
   export async function loadShipments() {
@@ -1746,6 +1790,7 @@ window.toggleActionsMenu = function(idx) {
       resultsDiv.innerHTML = `<div class="text-gray-400 text-center py-6">No results found.</div>`;
       return;
     }
+
     resultsDiv.innerHTML = `
       <div>
         <div class="font-bold text-purple-700 dark:text-purple-300 mt-2">Inventory (${inventoryMatches.length})</div>
@@ -1813,15 +1858,14 @@ window.toggleActionsMenu = function(idx) {
 
   async function showAddItemDialog() {
     const dialog = document.getElementById('addItemDialog');
+    dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Loading...</div>`;
+    dialog.showModal();
   
-    // Load products from Firestore
-    const productsData = await loadProducts();
-    const products = productsData.length
-  ? productsData
-  : inventory.map(i => ({ name: i.product }));
-  
-      const locations = await getAllLocationsWithContractors();
-      const statusOptions = (await loadSettings()).statuses;
+    if (!cachedProducts) cachedProducts = await loadProducts();
+    if (!cachedLocations) cachedLocations = await getAllLocationsWithContractors();
+    const products = cachedProducts.length ? cachedProducts : inventory.map(i => ({ name: i.product }));
+    const locations = cachedLocations;
+    const statusOptions = (await loadSettings()).statuses || [];
   
     dialog.innerHTML = `
       <form method="dialog" class="flex flex-col gap-3 w-80">
@@ -1874,6 +1918,10 @@ if (cancelBtn) {
 }
 
   dialog.showModal();
+
+  dialog.addEventListener('click', function(e) {
+    if (e.target === dialog) dialog.close();
+  });
 
   const scanBtn = dialog.querySelector('#scanBarcodeBtn');
 if (scanBtn) {
@@ -1949,8 +1997,13 @@ if (scanBtn) {
     };
     // Save
     const items = await loadInventory();
-    items.push(item);
-    await saveInventory(items);
+if (items.some(i => i.chargerId === chargerId)) {
+  dialog.querySelector("#formError").textContent = "Charger ID already exists!";
+  dialog.querySelector("#chargerId").classList.add('border-red-500');
+  return;
+}
+items.push(item);
+await saveInventory(items);
     showToast("Inventory item added", "green");
     dialog.close();
     inventory = items;
@@ -1959,8 +2012,14 @@ if (scanBtn) {
 }
 window.openStatusDialog = async function(unit) {
   const dialog = document.getElementById('actionDialog');
-  // Always get the latest statuses from settings
-  const statusOptions = await loadSettings().statuses;
+  dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Loading...</div>`;
+  dialog.showModal();
+
+  dialog.addEventListener('click', function(e) {
+    if (e.target === dialog) dialog.close();
+  });
+
+  const statusOptions = (await loadSettings()).statuses;
   dialog.innerHTML = `
     <form method="dialog" class="flex flex-col gap-3 w-80">
       <h3 class="font-bold mb-2">Change Status: ${unit.chargerId}</h3>
@@ -1970,6 +2029,15 @@ window.openStatusDialog = async function(unit) {
         <option value="">-- Select Status --</option>
         ${(statusOptions || []).map(s => `<option value="${s}"${unit.status === s ? " selected" : ""}>${s}</option>`).join("")}
       </select>
+      <div id="privatePublicSection" style="display:none">
+        <label class="font-bold">Installed as:</label>
+        <select id="privatePublic" class="border px-2 py-1 rounded">
+          <option value="">-- Select --</option>
+          <option value="Private">Private (optionally enter invoice)</option>
+          <option value="Public">Public (asset for depreciation)</option>
+        </select>
+        <input id="invoiceNumber" type="text" placeholder="Invoice Number (Optional)" class="border px-2 py-1 rounded" style="display:none">
+      </div>
       <textarea id="statusComment" placeholder="Comment (optional)" class="border px-2 py-1 rounded"></textarea>
       <div class="flex justify-between gap-2 mt-3">
         <button type="button" value="cancel" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
@@ -1979,28 +2047,64 @@ window.openStatusDialog = async function(unit) {
   `;
   dialog.showModal();
 
+  dialog.addEventListener('click', function(e) {
+    if (e.target === dialog) dialog.close();
+  });
+
   dialog.querySelector('button[value="cancel"]').onclick = e => {
     e.preventDefault();
     dialog.close();
   };
 
+  // Show/hide Installed section
+  const statusSel = dialog.querySelector("#newStatus");
+  statusSel.onchange = () => {
+    if (statusSel.value === "Installed") {
+      dialog.querySelector("#privatePublicSection").style.display = "";
+    } else {
+      dialog.querySelector("#privatePublicSection").style.display = "none";
+    }
+  };
+  dialog.querySelector("#privatePublic").onchange = () => {
+    dialog.querySelector("#invoiceNumber").style.display =
+      dialog.querySelector("#privatePublic").value === "Private" ? "" : "none";
+  };
+
   dialog.querySelector('form').onsubmit = async e => {
     e.preventDefault();
     const newStatus = dialog.querySelector("#newStatus").value.trim();
-    if (!newStatus) {
-      dialog.querySelector("#newStatus").classList.add('border-red-500');
-      dialog.querySelector("#formError").textContent = "Please select a status.";
-      return;
+    const privPubEl = dialog.querySelector("#privatePublic");
+    const privPub = privPubEl ? privPubEl.value : "";
+    const invoiceEl = dialog.querySelector("#invoiceNumber");
+    const invoice = invoiceEl ? invoiceEl.value.trim() : "";
+    const statusComment = dialog.querySelector("#statusComment").value.trim();
+
+    let valid = !!newStatus;
+    dialog.querySelector("#formError").textContent = "";
+    if (newStatus === "Installed") {
+      if (!privPubEl || !privPub) {
+        if (privPubEl) privPubEl.classList.add('border-red-500');
+        valid = false;
+      }
     }
+
+    dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
+
     let items = await loadInventory();
     const idx = items.findIndex(i => i.chargerId === unit.chargerId);
     if (idx >= 0) {
       items[idx].status = newStatus;
       items[idx].lastAction = new Date().toISOString();
+      if (newStatus === "Installed") {
+        items[idx].location = "Customer Stock";
+        items[idx].isAsset = privPub === "Public";
+        items[idx].invoiceNumber = privPub === "Private" ? invoice : "";
+      }
     }
     await saveInventory(items);
+
     // Audit log
-    const log = loadAuditLog();
+    const log = await loadAuditLog();
     log.push({
       date: new Date().toISOString(),
       action: "Status Change",
@@ -2009,12 +2113,14 @@ window.openStatusDialog = async function(unit) {
       simNumber: unit.simNumber,
       product: unit.product,
       from: unit.location,
+      to: items[idx]?.location || unit.location,
       statusFrom: unit.status,
       statusTo: newStatus,
-      user: getCurrentUser(),
-      comment: dialog.querySelector("#statusComment").value.trim()
+      user: getCurrentUserEmail(),
+      comment: statusComment
     });
-    saveAuditLog(log);
+    await saveAuditLog(log);
+
     showToast("Status updated", "blue");
     dialog.close();
     inventory = items;
@@ -2039,6 +2145,10 @@ window.openBarcodeScanner = function(onDetected) {
     </div>
   `;
   scanDialog.showModal();
+
+  scanDialog.addEventListener('click', function(e) {
+    if (e.target === scanDialog) scanDialog.close();
+  });
 
   let scanned = false;
 
@@ -2131,15 +2241,17 @@ window.openEditDialog = openEditDialog;
 window.deleteUnit = deleteUnit;
 
 export async function updateUnitsLocation(unitIds, newLocation) {
-  const inventory = await loadInventory();
+  let items = await loadInventory();
   unitIds.forEach(id => {
-    const unit = inventory.find(u => u.chargerId === id);
+    const unit = items.find(u => u.chargerId === id);
     if (unit) {
       unit.location = newLocation;
       unit.lastAction = new Date().toISOString();
     }
   });
-  await saveInventory(inventory);
+  await saveInventory(items);
+  inventory = items; // <-- update global
+  renderInventoryTable(document.getElementById('main-content'));
 }
   
 

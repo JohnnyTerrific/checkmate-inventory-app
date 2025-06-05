@@ -31,10 +31,10 @@ function getProductList() {
   const shipmentTypes = ["Sea", "Air", "Rail", "Truck"];
   const ports = ["Haifa", "Ashdod", "Eilat", "Ben Gurion", "Other"];
   
-    window.openShipmentDialog = function() {
-        const dialog = document.getElementById("shipmentDialog");
-        const products = getProductList();
-        const vendors = getVendorList();
+  export function openShipmentDialog() {
+    const dialog = document.getElementById("shipmentDialog");
+    const products = getProductList();
+    const vendors = getVendorList();
     
         dialog.innerHTML = `
         <form method="dialog"
