@@ -484,6 +484,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     injectInventoryFABs();
     renderInventoryTable(document.getElementById('main-content'));
 
+    window.dispatchEvent(new Event('resize'));
+
     setTimeout(() => {
       initializeInventorySearch();
       window.isInitialLoad = false;
@@ -644,15 +646,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function renderTableRows() {
     const main = document.getElementById('main-content');
-    if (!main) return;
-    const q = main.querySelector('#searchInput').value.toLowerCase();
-    const status = main.querySelector('#filterStatus').value;
-    const location = main.querySelector('#filterLocation').value;
-    const tbody = main.querySelector('#inventoryTableBody');
-    const searchInput = main.querySelector('#searchInput');
-    const filterStatus = main.querySelector('#filterStatus');
-    const filterLocation = main.querySelector('#filterLocation');
-    if (!searchInput || !filterStatus || !filterLocation || !tbody) return;
+if (!main) return;
+const searchInput = main.querySelector('#searchInput');
+const filterStatus = main.querySelector('#filterStatus');
+const filterLocation = main.querySelector('#filterLocation');
+const tbody = main.querySelector('#inventoryTableBody');
+if (!searchInput || !filterStatus || !filterLocation || !tbody) return;
+const q = searchInput.value.toLowerCase();
+const status = filterStatus.value;
+const location = filterLocation.value;
   
     let filtered = window.inventory;
     if (q) filtered = filtered.filter(i => {
@@ -823,12 +825,12 @@ if (selectAll) {
   }
 
   function ensureDialogs() {
-    ['addItemDialog', 'actionDialog', 'shipmentDialog', 'globalSearchDialog'].forEach(id => {
+    ['addItemDialog', 'actionDialog', 'shipmentDialog', 'globalSearchDialog', 'moveDialog', 'editDialog'].forEach(id => {
       if (!document.getElementById(id)) {
-        const dlg = document.createElement('dialog');
-        dlg.id = id;
-        dlg.className = 'rounded-xl p-4';
-        document.body.appendChild(dlg);
+        const dialog = document.createElement('dialog');
+        dialog.id = id;
+        dialog.className = 'rounded-xl p-4 max-w-md mx-auto';
+        document.body.appendChild(dialog);
       }
     });
   }
@@ -847,21 +849,24 @@ if (selectAll) {
           </svg>
         </button>
       </div>
-      <div id="mobileInventoryList" class="flex flex-col gap-3 mt-3"></div>
+      <div id="mobileInventoryList" class="flex flex-col gap-3 mt-3 px-3"></div>
       <button id="fabAdd" class="fixed bottom-6 right-6 bg-purple-600 text-white rounded-full w-16 h-16 flex items-center justify-center shadow-lg text-3xl z-50">
         <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="10" stroke="white"/>
           <path d="M12 8v8m4-4H8" stroke="white"/>
         </svg>
       </button>
-      <dialog id="addItemDialog" class="rounded-xl p-4"></dialog>
     `;
+  
+    // Ensure all dialogs exist after clearing main content
+    ensureDialogs();
   
     const list = main.querySelector('#mobileInventoryList');
     renderMobileInventoryList(list, items);
   
-    // Search/filter logic
-    main.querySelector('#searchInput').oninput = debounce((e) => {
+    // Fix search functionality for mobile
+    const searchInput = main.querySelector('#searchInput');
+    searchInput.oninput = debounce((e) => {
       const q = e.target.value.toLowerCase();
       const filtered = window.inventory.filter(i =>
         [i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status, i.location, i.notes]
@@ -872,17 +877,26 @@ if (selectAll) {
   
     // Scan button logic
     main.querySelector('#scanBtn').onclick = () => {
-      openBarcodeScanner(result => {
-        if (result) {
-          const found = window.inventory.find(i => i.chargerSerial === result || i.chargerId === result);
-          if (found) openDetailsDialog(found);
-          else showToast("Not found", "red");
-        }
-      });
+      if (typeof window.openBarcodeScanner === 'function') {
+        window.openBarcodeScanner(result => {
+          if (result) {
+            const found = window.inventory.find(i => i.chargerSerial === result || i.chargerId === result);
+            if (found && typeof window.openDetailsDialog === 'function') {
+              window.openDetailsDialog(found);
+            } else {
+              showToast("Not found", "red");
+            }
+          }
+        });
+      }
     };
   
     // FAB add logic
-    main.querySelector('#fabAdd').onclick = showAddItemDialog;
+    main.querySelector('#fabAdd').onclick = () => {
+      if (typeof showAddItemDialog === 'function') {
+        showAddItemDialog();
+      }
+    };
   }
 
   function debounce(fn, delay) {
@@ -896,9 +910,12 @@ if (selectAll) {
   function renderMobileInventoryList(list, items) {
     list.innerHTML = items.map(unit => `
       <div class="bg-white dark:bg-gray-800 rounded-xl shadow flex items-center px-4 py-3 relative mobile-inv-card" data-id="${unit.chargerId}">
-        <div class="flex-shrink-0 w-12 h-12 bg-blue-200 rounded-full flex items-center justify-center mr-3">
-          <svg class="w-7 h-7 text-blue-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <rect x="4" y="4" width="16" height="16" rx="4"/>
+                <div class="flex-shrink-0 w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center mr-3">
+          <svg class="w-7 h-7 text-indigo-600" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M4 6c0-1.1.9-2 2-2h12c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2V6zm4 2v8h8V8H8zm2 2h4v2h-4v-2zm0 3h4v1h-4v-1z"/>
+            <circle cx="8" cy="16" r="1"/>
+            <circle cx="16" cy="16" r="1"/>
+            <path d="M12 4v2M12 18v2"/>
           </svg>
         </div>
         <div class="flex-1 min-w-0">
@@ -906,45 +923,94 @@ if (selectAll) {
           <div class="text-xs text-gray-600 dark:text-gray-300">${unit.status} • ${unit.location}</div>
           <div class="text-xs text-gray-400 truncate">${unit.model || unit.product || ""}${unit.chargerSerial ? " • " + unit.chargerSerial : ""}</div>
         </div>
-        <button class="ml-2 text-gray-400 hover:text-purple-600" onclick='openDetailsDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})' title="View">
+        <button class="ml-2 text-gray-400 hover:text-purple-600 transition-all" onclick='window.openDetailsDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})' title="View Details">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path d="M1.5 12s3.5-7 10.5-7 10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12Z" stroke-linecap="round" stroke-linejoin="round"/>
             <circle cx="12" cy="12" r="3.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
-        <button class="ml-1 text-gray-400 hover:text-blue-600" onclick='openMoveDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})' title="Move">
+        <button class="ml-1 text-gray-400 hover:text-green-600 transition-all" onclick='window.openMoveDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})' title="Move Unit">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <rect x="3" y="7" width="13" height="10" rx="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M16 12h5m0 0l-2-2m2 2l-2 2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M3 12h18m0 0l-4-4m4 4l-4 4" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M3 6h18M3 18h18" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
       </div>
     `).join('');
   
-    // Re-attach swipe handlers
+    // Re-attach swipe handlers with proper error handling
     list.querySelectorAll('.mobile-inv-card').forEach(card => {
       let startX = null;
+      let dx = 0;
       let swiped = false;
+  
       card.addEventListener('touchstart', (e) => {
-        startX = e.touches[0].clientX;
-        swiped = false;
-      }, {passive: true});
-      card.addEventListener('touchmove', (e) => {
-        if (startX === null) return;
-        const dx = e.touches[0].clientX - startX;
-        if (dx < -50 && !swiped) { // Swipe left for Edit
-          swiped = true;
-          const unit = items.find(i => i.chargerId === card.dataset.id);
-          if (unit) window.openEditDialog(unit);
-        } else if (dx > 50 && !swiped) { // Swipe right for Move
-          swiped = true;
-          const unit = items.find(i => i.chargerId === card.dataset.id);
-          if (unit) window.openMoveDialog(unit);
+        try {
+          startX = e.touches[0].clientX;
+          dx = 0;
+          swiped = false;
+          card.style.transition = 'none';
+        } catch (err) {
+          console.warn('Touch start error:', err);
         }
-      }, {passive: true});
+      }, { passive: true });
+  
+      card.addEventListener('touchmove', (e) => {
+        try {
+          if (startX === null) return;
+          dx = e.touches[0].clientX - startX;
+          card.style.transform = `translateX(${dx}px)`;
+  
+          if (dx < -50 && !swiped) { // Swipe left for Edit
+            swiped = true;
+            card.style.transition = 'transform 0.2s';
+            card.style.transform = 'translateX(-80px)';
+            setTimeout(() => {
+              card.style.transform = '';
+              const unit = items.find(i => i.chargerId === card.dataset.id);
+              if (unit) {
+                // Ensure dialog exists before calling
+                ensureDialogs();
+                if (typeof window.openEditDialog === 'function') {
+                  window.openEditDialog(unit);
+                } else {
+                  console.warn('openEditDialog function not available');
+                }
+              }
+            }, 180);
+          } else if (dx > 50 && !swiped) { // Swipe right for Move
+            swiped = true;
+            card.style.transition = 'transform 0.2s';
+            card.style.transform = 'translateX(80px)';
+            setTimeout(() => {
+              card.style.transform = '';
+              const unit = items.find(i => i.chargerId === card.dataset.id);
+              if (unit) {
+                // Ensure dialog exists before calling
+                ensureDialogs();
+                if (typeof window.openMoveDialog === 'function') {
+                  window.openMoveDialog(unit);
+                } else {
+                  console.warn('openMoveDialog function not available');
+                }
+              }
+            }, 180);
+          } 
+        } catch (err) {
+          console.warn('Touch move error:', err);
+        }
+      }, { passive: true });
+  
       card.addEventListener('touchend', () => {
-        startX = null;
-        swiped = false;
+        try {
+          startX = null;
+          dx = 0;
+          swiped = false;
+          card.style.transition = 'transform 0.2s';
+          card.style.transform = '';
+        } catch (err) {
+          console.warn('Touch end error:', err);
+        }
       });
     });
   }
