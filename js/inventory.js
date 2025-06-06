@@ -96,11 +96,11 @@ export async function updateSingleItem(item) {
     });
     
     // Update the global inventory array
-    const index = inventory.findIndex(u => u.chargerId === item.chargerId);
+    const index = window.inventory.findIndex(u => u.chargerId === item.chargerId);
     if (index >= 0) {
-      inventory[index] = item;
+      window.inventory[index] = item;
     } else {
-      inventory.push(item);
+      window.inventory.push(item);
     }
   } catch (error) {
     console.error("Error updating item:", error);
@@ -112,7 +112,7 @@ export async function updateSingleItem(item) {
 function listenToInventoryUpdates() {
   const colRef = collection(db, "inventory");
   onSnapshot(colRef, (snapshot) => {
-    inventory = snapshot.docs.map(doc => ({ chargerId: doc.id, ...doc.data() }));
+    window.inventory = snapshot.docs.map(doc => ({ chargerId: doc.id, ...doc.data() }));
     // Only re-render if we're on inventory page and not during initial load
     if (document.body.dataset.page === "inventory" && 
         document.getElementById('main-content') && 
@@ -259,7 +259,7 @@ function attachHoverLegend(btn, text) {
   
   
 // UI State
-let inventory = [];
+window.inventory = [];
 
 let cachedProducts = null;
 let cachedLocations = null;
@@ -306,7 +306,7 @@ window.openBulkAddDialog = async function() {
       const rows = dialog.querySelector("#bulkText").value.trim().split("\n");
       const defaultLocation = dialog.querySelector("#bulkLocation").value;
       const defaultStatus = dialog.querySelector("#bulkStatus").value;
-      let items = [...inventory];
+      let items = [...window.inventory];
       let added = 0;
       let existingIds = new Set(items.map(i => i.chargerId));
       
@@ -336,7 +336,7 @@ window.openBulkAddDialog = async function() {
       }
       showToast(`Bulk added ${added} units`, "green");
       dialog.close();
-      inventory = items;
+      window.inventory = items;
       renderInventoryTable(document.getElementById('main-content'));
     };  
   }; 
@@ -357,7 +357,7 @@ window.openBulkAddDialog = async function() {
     await batch.commit();
   
     // Update local inventory
-    inventory = inventory.filter(i => !window.selectedUnits.includes(i.chargerId));
+    window.inventory = window.inventory.filter(i => !window.selectedUnits.includes(i.chargerId));
   
     // Log deletions
     const newEntries = window.selectedUnits.map(chargerId => ({
@@ -478,16 +478,17 @@ window.openBulkAddDialog = async function() {
 document.addEventListener('DOMContentLoaded', async () => {
   if (document.body.dataset.page === "inventory") {
     window.isInitialLoad = true;
-    inventory = await loadInventory();
+    window.inventory = await loadInventory();
     
     // Then inject FABs
     injectInventoryFABs();
     renderInventoryTable(document.getElementById('main-content'));
 
     setTimeout(() => {
+      initializeInventorySearch();
       window.isInitialLoad = false;
       listenToInventoryUpdates();
-    }, 1000);
+    }, 200);
   
     
     // Event handlers are already set in injectInventoryFABs(), but add hover legends
@@ -516,7 +517,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (action === 'view' && typeof window.openDetailsDialog === "function") {
           window.openDetailsDialog(unit);
         }
-      }, 300);
+      }, 500);
     }
   }
 });
@@ -528,7 +529,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function renderInventoryTable(main) {
     if (window.innerWidth < 640) {
-      renderInventoryMobile(main, inventory);
+      renderInventoryMobile(main, window.inventory);
       return;
     }
     main.innerHTML = `
@@ -537,11 +538,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         <input id="searchInput" type="text" placeholder="Search Anything" class="border px-3 py-1 rounded" style="min-width:200px;">
         <select id="filterStatus" class="border px-3 py-1 rounded">
           <option value="">All Statuses</option>
-          ${[...new Set(inventory.map(i => i.status))].map(s => `<option value="${s}">${s}</option>`).join("")}
+          ${[...new Set(window.inventory.map(i => i.status))].map(s => `<option value="${s}">${s}</option>`).join("")}
         </select>
         <select id="filterLocation" class="border px-3 py-1 rounded">
           <option value="">All Locations</option>
-          ${[...new Set(inventory.map(i => i.location))].map(l => `<option value="${l}">${l}</option>`).join("")}
+          ${[...new Set(window.inventory.map(i => i.location))].map(l => `<option value="${l}">${l}</option>`).join("")}
         </select>
         <button id="downloadCSV" class="bg-gray-200 px-3 py-1 rounded">Download CSV</button>
         <button id="downloadExcel" class="bg-gray-200 px-3 py-1 rounded">Download Excel</button>
@@ -567,29 +568,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       <div id="bulkActionBar"></div>
       <div id="paginationBar"></div>
     `;
-  
-  // Search/filter listeners
-  main.querySelector('#searchInput').oninput = () => {
-    console.log('Inventory length:', inventory.length);
-    window.inventoryPage = 1;
-    renderTableRows();
-  };
-  main.querySelector('#filterStatus').onchange = () => {
-    window.inventoryPage = 1;
-    renderTableRows();
-  };
-  main.querySelector('#filterLocation').onchange = () => {
-    window.inventoryPage = 1;
-    renderTableRows();
-  };
 
   // Download buttons
   main.querySelector('#downloadCSV').onclick = () => window.downloadInventoryCSV();
   main.querySelector('#downloadExcel').onclick = () => window.downloadInventoryExcel();
 
   injectInventoryFABs();
-
+  
+  // First render the table rows
   renderTableRows();
+  
+  // Then initialize search after DOM is ready
+  setTimeout(() => {
+    initializeInventorySearch();
+  }, 50);
 
   }
 
@@ -614,6 +606,40 @@ document.addEventListener('DOMContentLoaded', async () => {
       }, 100);
     }
   });
+
+  // Add this function after the renderInventoryTable function
+  function initializeInventorySearch() {
+    const main = document.getElementById('main-content');
+    if (!main) return;
+    
+    const searchInput = main.querySelector('#searchInput');
+    const filterStatus = main.querySelector('#filterStatus');
+    const filterLocation = main.querySelector('#filterLocation');
+    
+    if (!searchInput || !filterStatus || !filterLocation) {
+      console.log('Search elements not found, retrying...');
+      setTimeout(initializeInventorySearch, 100);
+      return;
+    }
+    
+    // Simple direct event listeners - no cloning needed
+    searchInput.oninput = debounce(() => {
+      window.inventoryPage = 1;
+      renderTableRows();
+    }, 250);
+    
+    filterStatus.onchange = () => {
+      window.inventoryPage = 1;
+      renderTableRows();
+    };
+    
+    filterLocation.onchange = () => {
+      window.inventoryPage = 1;
+      renderTableRows();
+    };
+    
+    console.log('Search functionality initialized');
+  }
   
 
   function renderTableRows() {
@@ -628,7 +654,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const filterLocation = main.querySelector('#filterLocation');
     if (!searchInput || !filterStatus || !filterLocation || !tbody) return;
   
-    let filtered = inventory;
+    let filtered = window.inventory;
     if (q) filtered = filtered.filter(i => {
       const allFields = [
         i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status,
@@ -646,7 +672,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const paginated = filtered.slice(startIdx, endIdx);
   
     // Only keep selectedUnits that are visible in the filtered list
-    window.selectedUnits = window.selectedUnits.filter(id => inventory.some(i => i.chargerId === id));
+    window.selectedUnits = window.selectedUnits.filter(id => window.inventory.some(i => i.chargerId === id));
     // Render table rows
     tbody.innerHTML = paginated.map((unit, idx) => `
       <tr class="inv-row${window.selectedUnits.includes(unit.chargerId) ? ' selected' : ''}" data-idx="${idx}" data-id="${unit.chargerId}">
@@ -837,7 +863,7 @@ if (selectAll) {
     // Search/filter logic
     main.querySelector('#searchInput').oninput = debounce((e) => {
       const q = e.target.value.toLowerCase();
-      const filtered = inventory.filter(i =>
+      const filtered = window.inventory.filter(i =>
         [i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status, i.location, i.notes]
           .some(f => (f || '').toLowerCase().includes(q))
       );
@@ -848,7 +874,7 @@ if (selectAll) {
     main.querySelector('#scanBtn').onclick = () => {
       openBarcodeScanner(result => {
         if (result) {
-          const found = inventory.find(i => i.chargerSerial === result || i.chargerId === result);
+          const found = window.inventory.find(i => i.chargerSerial === result || i.chargerId === result);
           if (found) openDetailsDialog(found);
           else showToast("Not found", "red");
         }
@@ -945,7 +971,7 @@ function addMobileSwipeHandlers() {
         row.classList.add('swiped-right');
         const idx = row.dataset.idx;
         const chargerId = row.dataset.id;
-        const unit = inventory.find(i => i.chargerId === chargerId);
+        const unit = window.inventory.find(i => i.chargerId === chargerId);
         if (unit && unit.location === 'Technician/Contractor') { // Only allow from Technician/Contractor
           openAssignContractorDialog(unit);
         }
@@ -994,7 +1020,7 @@ function addMobileSwipeHandlers() {
   
   // Add at end of inventory.js, simple CSV export:
   async function downloadInventoryCSV() {
-    const items = [...inventory];
+    const items = [...window.inventory];
     const header = ["Charger ID", "Serial", "Status", "Location", "Last Action"];
     const rows = items.map(i => [i.chargerId, i.chargerSerial, i.status, i.location, i.lastAction]);
     let csv = header.join(",") + "\n" + rows.map(r => r.join(",")).join("\n");
@@ -1007,7 +1033,7 @@ function addMobileSwipeHandlers() {
     URL.revokeObjectURL(url);
   }
   async function downloadInventoryExcel() {
-    const items = [...inventory];
+    const items = [...window.inventory];
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(items);
     XLSX.utils.book_append_sheet(wb, ws, "Inventory");
@@ -1021,7 +1047,7 @@ function addMobileSwipeHandlers() {
   }
 
   window.openBulkMoveDialog = async function() {
-    const selected = inventory.filter(i => window.selectedUnits.includes(i.chargerId));
+    const selected = window.inventory.filter(i => window.selectedUnits.includes(i.chargerId));
     if (!selected.length) return;
   
     const dialog = document.getElementById('actionDialog');
@@ -1117,7 +1143,7 @@ function addMobileSwipeHandlers() {
     
       dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
     
-      let items = [...inventory];
+      let items = [...window.inventory];
       const prevStates = [];
       selected.forEach(unit => {
         const idx = items.findIndex(i => i.chargerId === unit.chargerId);
@@ -1158,7 +1184,7 @@ function addMobileSwipeHandlers() {
         }
         showToast("Bulk move undone", "red");
         window.selectedUnits = [];
-        inventory = [...inventory].map(item => {
+        window.inventory = [...window.inventory].map(item => {
           const prev = prevStates.find(p => p.chargerId === item.chargerId);
           return prev || item;
         });
@@ -1167,13 +1193,13 @@ function addMobileSwipeHandlers() {
     
       dialog.close();
       window.selectedUnits = [];
-      inventory = items;
+      window.inventory = items;
       renderInventoryTable(document.getElementById('main-content'));
     };
   };
   
   window.openBulkStatusDialog = async function() {
-    const selected = inventory.filter(i => window.selectedUnits.includes(i.chargerId));
+    const selected = window.inventory.filter(i => window.selectedUnits.includes(i.chargerId));
     if (!selected.length) return;
   
     const dialog = document.getElementById('actionDialog');
@@ -1252,7 +1278,7 @@ function addMobileSwipeHandlers() {
         dialog.querySelector("#formError").textContent = "Select all required fields.";
         return;
       }
-      let items = [...inventory];
+      let items = [...window.inventory];
       const prevStates = [];
       selected.forEach(unit => {
         const idx = items.findIndex(i => i.chargerId === unit.chargerId);
@@ -1302,7 +1328,7 @@ function addMobileSwipeHandlers() {
           await updateSingleItem(prevState);
         }
         showToast("Bulk status undo", "red");
-        inventory = [...inventory].map(item => {
+        window.inventory = [...window.inventory].map(item => {
           const prev = prevStates.find(p => p.chargerId === item.chargerId);
           return prev || item;
         });
@@ -1312,7 +1338,7 @@ function addMobileSwipeHandlers() {
   
       dialog.close();
       window.selectedUnits = [];
-      inventory = items;
+      window.inventory = items;
       renderInventoryTable(document.getElementById('main-content'));
     };
   };   
@@ -1409,12 +1435,12 @@ window.toggleActionsMenu = function(idx) {
 
     dialog.querySelector('button[value="cancel"]').onclick = e => { e.preventDefault(); dialog.close(); };
     dialog.querySelector('button[value="ok"]').onclick = async e => {
-      let items = [...inventory];
+      let items = [...window.inventory];
       items = items.filter(i => i.chargerId !== chargerId);
       await deleteDoc(doc(db, "inventory", chargerId));
-inventory = inventory.filter(i => i.chargerId !== chargerId);
+      window.inventory = window.inventory.filter(i => i.chargerId !== chargerId);
       showToast("Unit deleted", "red");
-      inventory = items;
+      window.inventory = items;
       renderInventoryTable(document.getElementById('main-content'));
       dialog.close();
     };
@@ -1550,7 +1576,7 @@ inventory = inventory.filter(i => i.chargerId !== chargerId);
       // ...existing validation and move logic...
       dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
     
-      let items = [...inventory];
+      let items = [...window.inventory];
       const idx = items.findIndex(i => i.chargerId === unit.chargerId);
       if (idx >= 0) {
         items[idx].location = moveLoc;
@@ -1578,7 +1604,7 @@ inventory = inventory.filter(i => i.chargerId !== chargerId);
 
       showToast("Unit moved", "blue");
       dialog.close();
-      inventory = items;
+      window.inventory = items;
       renderInventoryTable(document.getElementById('main-content'));
     };
   };
@@ -1655,7 +1681,7 @@ inventory = inventory.filter(i => i.chargerId !== chargerId);
 
   dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
 
-  let items = [...inventory];
+  let items = [...window.inventory];
   const idx = items.findIndex(i => i.chargerId === unit.chargerId);
   if (idx >= 0) {
     items[idx].location = contractor.name;
@@ -1685,7 +1711,7 @@ inventory = inventory.filter(i => i.chargerId !== chargerId);
 
   showToast('Unit assigned to contractor', 'blue');
   dialog.close();
-  inventory = items;
+  window.inventory = items;
   renderInventoryTable(document.getElementById('main-content'));
 };
   };
@@ -1780,7 +1806,7 @@ inventory = inventory.filter(i => i.chargerId !== chargerId);
     
       dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
     
-      let items = [...inventory];
+      let items = [...window.inventory];
       const idx = items.findIndex(i => i.chargerId === unit.chargerId);
       if (idx < 0) {
         showToast("Unit not found", "red");
@@ -1810,15 +1836,15 @@ inventory = inventory.filter(i => i.chargerId !== chargerId);
       showUndoToast("Unit updated", "blue", async () => {
         await updateSingleItem(prev);
         showToast("Edit undone", "red");
-        const index = inventory.findIndex(i => i.chargerId === prev.chargerId);
+        const index = window.inventory.findIndex(i => i.chargerId === prev.chargerId);
         if (index >= 0) {
-          inventory[index] = prev;
-        }
+        window.inventory[index] = prev;
+      }
         renderInventoryTable(document.getElementById('main-content'));
       });
   
       dialog.close();
-      inventory = items;
+      window.inventory = items;
       renderInventoryTable(document.getElementById('main-content'));
     };
   };  
@@ -1867,42 +1893,51 @@ inventory = inventory.filter(i => i.chargerId !== chargerId);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   }
   
-  // --- Global Search using Firestore ---
-  window.performGlobalSearch = async function(query) {
-    const resultsDiv = document.getElementById('globalSearchResults');
-    if (!resultsDiv) return;
-  
-    // Load all data from Firestore
-    const [shipments, inventory, products] = await Promise.all([
+// --- Global Search using Firestore ---
+window.performGlobalSearch = async function(query, forceReload = false) {
+  const resultsDiv = document.getElementById('globalSearchResults');
+  if (!resultsDiv) return;
+
+  let shipments, products, loadedInventory;
+  if (!window.inventory.length || forceReload) {
+    [shipments, loadedInventory, products] = await Promise.all([
       loadShipments(),
       loadInventory(),
       loadProducts()
     ]);
-  
-    if (!query) {
-      resultsDiv.innerHTML = `<div class="text-gray-400 text-center py-6">Start typing to search...</div>`;
-      return;
-    }
-    const q = query.toLowerCase();
-  
-    const shipmentMatches = shipments.filter(s =>
-      (s.shipmentId || '').toLowerCase().includes(q) ||
-      (s.vendor || '').toLowerCase().includes(q) ||
-      (s.incoterm || '').toLowerCase().includes(q) ||
-      (Array.isArray(s.products) && s.products.some(p => (p.model || '').toLowerCase().includes(q)))
-    );
-    const inventoryMatches = inventory.filter(i => {
-      const allFields = [
-        i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status,
-        i.location, i.notes, i.lastAction, i.addedBy, i.invoiceNumber
-      ];
-      return allFields.some(field => (field || '').toLowerCase().includes(q));
-    });
-    const productMatches = products.filter(p =>
-      (p.name || '').toLowerCase().includes(q) ||
-      (p.hsCode || '').toLowerCase().includes(q) ||
-      (p.vendor || '').toLowerCase().includes(q)
-    );
+    window.inventory = loadedInventory;
+  } else {
+    [shipments, products] = await Promise.all([
+      loadShipments(),
+      loadProducts()
+    ]);
+    loadedInventory = window.inventory;
+  }
+
+  if (!query) {
+    resultsDiv.innerHTML = `<div class="text-gray-400 text-center py-6">Start typing to search...</div>`;
+    return;
+  }
+  const q = query.toLowerCase();
+
+  const shipmentMatches = shipments.filter(s =>
+    (s.shipmentId || '').toLowerCase().includes(q) ||
+    (s.vendor || '').toLowerCase().includes(q) ||
+    (s.incoterm || '').toLowerCase().includes(q) ||
+    (Array.isArray(s.products) && s.products.some(p => (p.model || '').toLowerCase().includes(q)))
+  );
+  const inventoryMatches = loadedInventory.filter(i => {
+    const allFields = [
+      i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status,
+      i.location, i.notes, i.lastAction, i.addedBy, i.invoiceNumber
+    ];
+    return allFields.some(field => (field || '').toLowerCase().includes(q));
+  });
+  const productMatches = products.filter(p =>
+    (p.name || '').toLowerCase().includes(q) ||
+    (p.hsCode || '').toLowerCase().includes(q) ||
+    (p.vendor || '').toLowerCase().includes(q)
+  );
   
     if (shipmentMatches.length === 0 && inventoryMatches.length === 0 && productMatches.length === 0) {
       resultsDiv.innerHTML = `<div class="text-gray-400 text-center py-6">No results found.</div>`;
@@ -1933,8 +1968,8 @@ inventory = inventory.filter(i => i.chargerId !== chargerId);
     resultsDiv.querySelectorAll('.move-btn').forEach(btn => {
       btn.onclick = function() {
         const chargerId = btn.dataset.chargerid;
-        const chargerSerial = btn.dataset.serial;
-        const unit = inventory.find(i => i.chargerId === chargerId && i.chargerSerial === chargerSerial);
+        // const chargerSerial = btn.dataset.serial; // Not needed
+        const unit = window.inventory.find(i => i.chargerId === chargerId);
         if (unit) {
           window.openMoveDialog(unit);
           document.getElementById('globalSearchDialog').close();
@@ -1946,8 +1981,8 @@ inventory = inventory.filter(i => i.chargerId !== chargerId);
     resultsDiv.querySelectorAll('.edit-inventory-btn').forEach(btn => {
       btn.onclick = function() {
         const chargerId = btn.dataset.chargerid;
-        const chargerSerial = btn.dataset.serial;
-        const unit = inventory.find(i => i.chargerId === chargerId && i.chargerSerial === chargerSerial);
+        // const chargerSerial = btn.dataset.serial; // Not needed
+        const unit = window.inventory.find(i => i.chargerId === chargerId);
         if (unit) {
           window.openEditDialog(unit);
           document.getElementById('globalSearchDialog').close();
@@ -1959,7 +1994,7 @@ inventory = inventory.filter(i => i.chargerId !== chargerId);
     resultsDiv.querySelectorAll('.view-inventory-btn').forEach(btn => {
       btn.onclick = function() {
         const chargerId = btn.dataset.chargerid;
-        const unit = inventory.find(i => i.chargerId === chargerId);
+        const unit = window.inventory.find(i => i.chargerId === chargerId);
         if (unit) {
           if (typeof window.openDetailsDialog === "function") {
             window.openDetailsDialog(unit);
@@ -1981,7 +2016,7 @@ inventory = inventory.filter(i => i.chargerId !== chargerId);
   
     if (!cachedProducts) cachedProducts = await loadProducts();
     if (!cachedLocations) cachedLocations = await getAllLocationsWithContractors();
-    const products = cachedProducts.length ? cachedProducts : inventory.map(i => ({ name: i.product }));
+    const products = cachedProducts.length ? cachedProducts : window.inventory.map(i => ({ name: i.product }));
     const locations = cachedLocations;
     const statusOptions = (await loadSettings()).statuses || [];
   
@@ -2114,7 +2149,7 @@ if (scanBtn) {
       invoiceNumber: (status === "Installed" && privPub === "Private") ? invoice : ""
     };
     // Save
-    const items = [...inventory];
+    const items = [...window.inventory];
 if (items.some(i => i.chargerId === chargerId)) {
   dialog.querySelector("#formError").textContent = "Charger ID already exists!";
   dialog.querySelector("#chargerId").classList.add('border-red-500');
@@ -2124,7 +2159,7 @@ items.push(item);
 await updateSingleItem(item);
     showToast("Inventory item added", "green");
     dialog.close();
-    inventory = items;
+    window.inventory = items;
     renderInventoryTable(document.getElementById('main-content'));
   };
 }
@@ -2208,7 +2243,7 @@ window.openStatusDialog = async function(unit) {
 
     dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
 
-    let items = [...inventory];
+    let items = [...window.inventory];
     const idx = items.findIndex(i => i.chargerId === unit.chargerId);
     if (idx >= 0) {
       items[idx].status = newStatus;
@@ -2239,7 +2274,7 @@ window.openStatusDialog = async function(unit) {
 
     showToast("Status updated", "blue");
     dialog.close();
-    inventory = items;
+    window.inventory = items;
     renderInventoryTable(document.getElementById('main-content'));
   };
 };
@@ -2348,16 +2383,16 @@ window.openBarcodeScanner = function(onDetected) {
 };
 
 export async function updateUnitsLocation(unitIds, newLocation) {
-  let items = [...inventory];
+  let items = [...window.inventory];
   unitIds.forEach(id => {
-    const unit = items.find(u => u.chargerId === id);
+    const unit = window.inventory.find(i => i.chargerId === chargerId);
     if (unit) {
       unit.location = newLocation;
       unit.lastAction = new Date().toISOString();
     }
   });
   await saveInventory(items);
-  inventory = items; // <-- update global
+  window.inventory = items; // <-- update global
   
   // Only re-render if we're on the inventory page and DOM is ready
   if (document.body.dataset.page === "inventory" && document.getElementById('main-content')) {
@@ -2378,6 +2413,8 @@ window.openStatusDialog = openStatusDialog;
 window.openEditDialog = openEditDialog;
 window.deleteUnit = deleteUnit;
 // Add at the very end with other window assignments:
+window.loadAuditLog = loadAuditLog;
+window.saveAuditLog = saveAuditLog;
 window.showAddItemDialog = showAddItemDialog;
 window.openBarcodeScanner = openBarcodeScanner;
 window.performGlobalSearch = performGlobalSearch;
