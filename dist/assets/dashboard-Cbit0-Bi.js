@@ -1,4 +1,4 @@
-import"./users-CxsDH44-.js";import{l as w,b as k,g as L,a as x}from"./inventory-Cvhx57H-.js";import"./shipments-B-EjWcqh.js";function $(){document.getElementById("main-content").innerHTML=`
+import"./users-CxsDH44-.js";import{l as w,b as k,g as L,a as x}from"./inventory-CiL_UlbO.js";import"./shipments-DvAFWwBp.js";function $(){document.getElementById("main-content").innerHTML=`
     <section class="max-w-7xl mx-auto px-3 py-3 space-y-4">
       <header class="flex items-center justify-between">
         <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
