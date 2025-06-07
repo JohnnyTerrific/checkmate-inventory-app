@@ -300,45 +300,48 @@ window.openBulkAddDialog = async function() {
 
   dialog.querySelector('button[value="cancel"]').onclick = e => { e.preventDefault(); dialog.close(); };
   
-    dialog.querySelector('form').onsubmit = async e => {
-      e.preventDefault();
-      dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
-      const rows = dialog.querySelector("#bulkText").value.trim().split("\n");
-      const defaultLocation = dialog.querySelector("#bulkLocation").value;
-      const defaultStatus = dialog.querySelector("#bulkStatus").value;
-      let items = [...window.inventory];
-      let added = 0;
-      let existingIds = new Set(items.map(i => i.chargerId));
-      
-      for (let row of rows) {
-        // Accept tab-separated OR comma-separated
-        let [model, chargerId, chargerSerial, simNumber] = row.split(/\t|,/).map(v => v?.trim());
-        if (!chargerId || existingIds.has(chargerId)) continue;
-        existingIds.add(chargerId);
-        items.push({
-          chargerId,
-          chargerSerial: chargerSerial || "",
-          simNumber: simNumber || "",
-          model: model || "",
-          product: model || "",
-          location: defaultLocation,
-          status: defaultStatus,
-          assigned: false,
-          created: new Date().toISOString(),
-          addedBy: getCurrentUserEmail(),
-          lastAction: new Date().toISOString(),
-          notes: ""
-        });
-        added++;
-      }
-      for (const item of items.slice(inventory.length)) {
-        await updateSingleItem(item);
-      }
-      showToast(`Bulk added ${added} units`, "green");
-      dialog.close();
-      window.inventory = items;
-      renderInventoryTable(document.getElementById('main-content'));
-    };  
+dialog.querySelector('form').onsubmit = async e => {
+  e.preventDefault();
+  // Read values BEFORE replacing innerHTML
+  const rows = dialog.querySelector("#bulkText").value.trim().split("\n");
+  const defaultLocation = dialog.querySelector("#bulkLocation").value;
+  const defaultStatus = dialog.querySelector("#bulkStatus").value;
+
+  dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
+
+  let items = [...window.inventory];
+  let added = 0;
+  let existingIds = new Set(items.map(i => i.chargerId));
+
+  for (let row of rows) {
+    // Accept tab-separated OR comma-separated
+    let [model, chargerId, chargerSerial, simNumber] = row.split(/\t|,/).map(v => v?.trim());
+    if (!chargerId || existingIds.has(chargerId)) continue;
+    existingIds.add(chargerId);
+    items.push({
+      chargerId,
+      chargerSerial: chargerSerial || "",
+      simNumber: simNumber || "",
+      model: model || "",
+      product: model || "",
+      location: defaultLocation,
+      status: defaultStatus,
+      assigned: false,
+      created: new Date().toISOString(),
+      addedBy: getCurrentUserEmail(),
+      lastAction: new Date().toISOString(),
+      notes: ""
+    });
+    added++;
+  }
+  for (const item of items.slice(window.inventory.length)) {
+    await updateSingleItem(item);
+  }
+  showToast(`Bulk added ${added} units`, "green");
+  dialog.close();
+  window.inventory = items;
+  renderInventoryTable(document.getElementById('main-content'));
+};
   }; 
 
   window.bulkDelete = async function() {
