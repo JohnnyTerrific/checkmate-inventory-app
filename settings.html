@@ -17,7 +17,6 @@
 </head>
 <body data-page="settings" class="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100">
     <section class="p-6">
-      <h2 class="text-2xl font-bold mb-6">Settings</h2>
       <div class="grid md:grid-cols-4 sm:grid-cols-2 gap-8">
         <!-- Locations -->
         <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-5 flex flex-col">
@@ -45,6 +44,16 @@
             Add Contractor
           </button>
         </div>
+                        <!-- Parent Containers (NEW) -->
+                        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-5 flex flex-col">
+                          <h3 class="text-lg font-semibold mb-3">Parent Containers</h3>
+                          <ul id="parentContainerList" class="space-y-2 flex-1 max-h-64 overflow-y-auto"></ul>
+                          <button id="addParentContainerBtn" class="mt-4 w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded transition">
+                            Add Parent Container
+                          </button>
+                        </div>
+                      </div>
+                      <div class="grid md:grid-cols-4 sm:grid-cols-2 gap-8">
       </div>
       <dialog id="entryDialog" class="rounded-xl p-4"></dialog>
       <dialog id="confirmDialog" class="rounded-xl p-4"></dialog>

@@ -1,7 +1,7 @@
 // inventory.js (starter for Inventory Management tab)
 
 import { showToast } from './core.js';
-import { allowedStatusesByLocation, loadSettings } from './settings.js';
+import { allowedStatusesByParent, getAllowedStatusesForLocation, loadSettings } from './settings.js';
 import { getCurrentUser, getCurrentUserEmail } from './utils/users.js';
 import Quagga from 'quagga';
 import * as XLSX from 'xlsx';
@@ -524,9 +524,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
   
-  function getAllowedStatusesForLocation(loc) {
-    return allowedStatusesByLocation[loc] || [];
-  }
+async function getStatusesForLocation(loc) {
+  const settings = await loadSettings();
+  return getAllowedStatusesForLocation(loc, settings);
+}
 
 
   function renderInventoryTable(main) {

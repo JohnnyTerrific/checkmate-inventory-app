@@ -1,146 +1,215 @@
 import { loadInventory, loadShipments } from "../js/inventory.js";
-import { getDashboardStats } from "../js/settings.js";
-import { loadSettings } from "../js/settings.js";
+import { 
+  getDashboardStats, 
+  loadSettings,
+  getLocationsByParent,
+  getParentContainerById 
+} from "../js/settings.js";
 
 // 1. Stat Cards Data Aggregation
- function injectDashboardPage() {
-   document.getElementById('main-content').innerHTML = `
-     <section class="max-w-7xl mx-auto px-4 py-6 space-y-8">
-       <header class="flex items-center justify-between">
-         <h1 class="text-3xl font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
-        </header>
- 
-        <!-- 1️⃣ KPI CARDS -->
-  <div id="stat-cards" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-2"></div>
- 
-        <!-- 2️⃣ FILTER BAR -->
-        <div id="dashboardFilters" class="flex flex-wrap gap-4 items-center">
-          <select id="filterStatus" class="p-2 border rounded">
-            <option value="">All Statuses</option>
-          </select>
-        </div>
- 
-        <!-- 3️⃣ SHIPMENT COUNTDOWN -->
-        <div id="shipmentCountdown" class="p-4 bg-white dark:bg-gray-800 rounded-2xl shadow flex items-center">
-          <span class="font-medium text-gray-600 dark:text-gray-400 mr-2">Next Shipment:</span>
-          <span id="nextShipmentTimer" class="font-bold text-xl text-gray-800 dark:text-gray-100">—</span>
-        </div>
- 
-        <!-- 4️⃣ AGING ALERTS -->
-        <div id="agingAlerts" class="p-4 bg-red-50 dark:bg-red-900 rounded-2xl shadow">
-          <h2 class="font-semibold text-red-700 dark:text-red-300 mb-2">Overdue Assignments</h2>
-          <ul id="agingList" class="list-disc list-inside text-gray-700 dark:text-gray-200"></ul>
-        </div>
- 
-        <!-- 5️⃣ EXISTING CHARTS -->
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-  <!-- Status Donut -->
-  <div class="bg-white dark:bg-gray-800 rounded-2xl shadow p-4 flex flex-col items-center justify-center h-[260px] relative overflow-hidden">
-    <canvas id="statusChart" width="220" height="220" class="!w-[220px] !h-[220px]"></canvas>
-    <!-- Pills Here -->
-<div id="statusPills" class="mt-3 flex gap-2 flex-wrap justify-center max-w-full"></div>  </div>
+function injectDashboardPage() {
+  document.getElementById('main-content').innerHTML = `
+    <section class="max-w-7xl mx-auto px-3 py-3 space-y-4">
+      <header class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
+       </header>
 
-    <!-- Lost Meter -->
-  <div class="bg-white dark:bg-gray-800 rounded-2xl shadow p-4 flex flex-col items-center justify-center h-[260px] relative overflow-hidden">
-    <canvas id="lostMeter" width="220" height="220" class="!w-[220px] !h-[220px]"></canvas>
-    <div id="lostMeterLabel" class="mt-2 text-sm text-center text-gray-700 dark:text-gray-300"></div>
-    <div id="lostMeterLegend" class="mt-2 text-xs text-gray-500 dark:text-gray-400"></div>
-  </div>
+       <!-- 1️⃣ KPI CARDS -->
+       <div id="stat-cards" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-3"></div>
 
-    <!-- Location Bar Chart -->
-  <div class="bg-white dark:bg-gray-800 rounded-2xl shadow p-4 h-[260px]">
-    <canvas id="locationBar"></canvas>
-  </div>
+       <!-- 2️⃣ FILTER BAR -->
+       <div id="dashboardFilters" class="flex flex-wrap gap-3 items-center mb-3">
+         <select id="filterStatus" class="p-2 border rounded text-sm">
+           <option value="">All Statuses</option>
+         </select>
+       </div>
 
-  </div> <!-- 🔹 Closes the grid for charts -->
-</section> <!-- 🔹 Closes the section -->
-    `;
+       <!-- 3️⃣ SHIPMENT COUNTDOWN -->
+       <div id="shipmentCountdown" class="p-3 bg-white dark:bg-gray-800 rounded-xl shadow flex items-center mb-3">
+         <span class="font-medium text-gray-600 dark:text-gray-400 mr-2 text-sm">Next Shipment:</span>
+         <span id="nextShipmentTimer" class="font-bold text-lg text-gray-800 dark:text-gray-100">—</span>
+       </div>
+
+       <!-- 4️⃣ AGING ALERTS -->
+       <div id="agingAlerts" class="p-3 bg-red-50 dark:bg-red-900 rounded-xl shadow mb-4">
+         <h2 class="font-semibold text-red-700 dark:text-red-300 mb-2 text-sm">Overdue Assignments</h2>
+         <ul id="agingList" class="list-disc list-inside text-gray-700 dark:text-gray-200 text-sm"></ul>
+       </div>
+
+       <!-- 5️⃣ CHARTS - FIXED HEIGHT CONTAINERS -->
+       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4" style="height: 340px;">
+         <!-- Status Donut -->
+         <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex flex-col items-center h-full">
+           <div class="w-64 h-64 flex items-center justify-center mb-3 flex-shrink-0">
+             <canvas id="statusChart" width="240" height="240" class="!w-[240px] !h-[240px]"></canvas>
+           </div>
+           <div id="statusPills" class="w-full flex-1 min-h-0 flex gap-1 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 pb-1 items-start content-start flex-wrap"></div>
+         </div>
+
+         <!-- Lost Meter -->
+         <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex flex-col items-center h-full">
+           <div class="w-64 h-64 flex items-center justify-center mb-3 flex-shrink-0">
+             <canvas id="lostMeter" width="240" height="240" class="!w-[240px] !h-[240px]"></canvas>
+           </div>
+           <div class="flex flex-col items-center flex-1">
+             <div id="lostMeterLabel" class="text-xs text-center text-gray-700 dark:text-gray-300"></div>
+             <div id="lostMeterLegend" class="text-xs text-gray-500 dark:text-gray-400 text-center mt-1"></div>
+           </div>
+         </div>
+
+         <!-- Location Bar Chart -->
+         <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex flex-col h-full">
+           <div class="w-64 h-64 mx-auto flex-shrink-0">
+             <canvas id="locationBar" width="240" height="240" class="!w-[240px] !h-[240px]"></canvas>
+           </div>
+         </div>
+       </div>
+</section>
+   `;
+}
+  
+function renderStatusDonut(byStatus, originalByStatus) {
+  const ctx = document.getElementById('statusChart').getContext('2d');
+  if (window.statusChart && typeof window.statusChart.destroy === 'function') {
+    window.statusChart.destroy();
   }
+  // Keep a reference to the original byStatus for reset
+  if (!originalByStatus) originalByStatus = byStatus;
+
+  // Group small values together for better readability
+  const total = Object.values(byStatus).reduce((sum, val) => sum + val, 0);
+  const threshold = Math.max(1, Math.floor(total * 0.02)); // 2% minimum or at least 1
   
-  function renderStatusDonut(byStatus, originalByStatus) {
-    const ctx = document.getElementById('statusChart').getContext('2d');
-    if (window.statusChart && typeof window.statusChart.destroy === 'function') {
-      window.statusChart.destroy();
+  let processedData = {};
+  let othersCount = 0;
+  
+  Object.entries(byStatus).forEach(([status, count]) => {
+    if (count >= threshold) {
+      processedData[status] = count;
+    } else {
+      othersCount += count;
     }
-    // Keep a reference to the original byStatus for reset
-    if (!originalByStatus) originalByStatus = byStatus;
+  });
   
-    window.statusChart = new Chart(ctx, {
-      type: 'doughnut',
-      data: {
-        labels: Object.keys(byStatus),
-        datasets: [{
-          data: Object.values(byStatus),
-          backgroundColor: [
-            'rgba(255,0,0,0.7)', 'rgba(255,127,0,0.7)', 'rgba(255,255,0,0.7)',
-            'rgba(0,255,0,0.7)', 'rgba(0,0,255,0.7)', 'rgba(75,0,130,0.7)', 'rgba(143,0,255,0.7)',
-            'rgba(0,255,255,0.7)', 'rgba(255,105,180,0.7)', 'rgba(165,42,42,0.7)'
-          ],
-          borderWidth: 2,
-          borderColor: '#fff',
-          hoverOffset: 8
-        }]
-      },
-      options: {
-        cutout: '70%',
-        responsive: false,
-        maintainAspectRatio: true,
-        aspectRatio: 1,
-        plugins: {
-          legend: { display: false },
-          tooltip: { enabled: true },
-          datalabels: {
-            color: '#222',
-            font: { weight: 'bold', size: 14 },
-            formatter: (value) => value
+  // Add "Others" category if there are grouped items
+  if (othersCount > 0) {
+    processedData['Others'] = othersCount;
+  }
+
+  window.statusChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: Object.keys(processedData),
+      datasets: [{
+        data: Object.values(processedData),
+        backgroundColor: [
+          'rgba(255,0,0,0.7)', 'rgba(255,127,0,0.7)', 'rgba(255,255,0,0.7)',
+          'rgba(0,255,0,0.7)', 'rgba(0,0,255,0.7)', 'rgba(75,0,130,0.7)', 'rgba(143,0,255,0.7)',
+          'rgba(0,255,255,0.7)', 'rgba(255,105,180,0.7)', 'rgba(165,42,42,0.7)'
+        ],
+        borderWidth: 3,
+        borderColor: '#fff',
+        hoverOffset: 12
+      }]
+    },
+    options: {
+      cutout: '65%',
+      responsive: false,
+      maintainAspectRatio: true,
+      aspectRatio: 1,
+      plugins: {
+        legend: { display: false },
+        tooltip: { 
+          enabled: true,
+          callbacks: {
+            label: function(context) {
+              const label = context.label;
+              const value = context.parsed;
+              const percentage = ((value / total) * 100).toFixed(1);
+              
+              if (label === 'Others') {
+                // Show breakdown of "Others" in tooltip
+                const otherItems = Object.entries(byStatus)
+                  .filter(([status, count]) => count < threshold)
+                  .map(([status, count]) => `${status}: ${count}`)
+                  .join(', ');
+                return [`Others (${percentage}%): ${value}`, otherItems];
+              }
+              return `${label}: ${value} (${percentage}%)`;
+            }
           }
         },
-        // 👇 Add click handler for filtering
-        onClick: function(evt, elements) {
-          if (elements.length > 0) {
-            const idx = elements[0].index;
-            const status = this.data.labels[idx];
-            // Only filter if not already filtered to one status
-            if (Object.keys(byStatus).length > 1) {
-              // Filter to just the clicked status
-              renderStatusDonut({ [status]: this.data.datasets[0].data[idx] }, originalByStatus);
-            }
-          } else {
-            // If user clicks outside, reset to all statuses
-            renderStatusDonut(originalByStatus, originalByStatus);
+        datalabels: {
+          display: function(context) {
+            // Only show labels for slices > 5% to avoid overcrowding
+            const percentage = (context.parsed / total) * 100;
+            return percentage > 5;
+          },
+          color: '#222',
+          font: { weight: 'bold', size: 14 },
+          formatter: (value, context) => {
+            const percentage = ((value / total) * 100).toFixed(0);
+            return percentage > 8 ? value : ''; // Only show number if > 8%
           }
         }
       },
-      plugins: [ChartDataLabels]
+      // Click handler for filtering
+      onClick: function(evt, elements) {
+        if (elements.length > 0) {
+          const idx = elements[0].index;
+          const status = this.data.labels[idx];
+          
+          // Don't allow filtering on "Others" category
+          if (status === 'Others') return;
+          
+          // Only filter if not already filtered to one status
+          if (Object.keys(byStatus).length > 1) {
+            // Filter to just the clicked status
+            const originalValue = byStatus[status];
+            renderStatusDonut({ [status]: originalValue }, originalByStatus);
+          }
+        } else {
+          // If user clicks outside, reset to all statuses
+          renderStatusDonut(originalByStatus, originalByStatus);
+        }
+      }
+    },
+    plugins: [ChartDataLabels]
+  });
+
+  // Use original data for pills (not the grouped data)
+  renderStatusPills(byStatus, (selectedStatus) => {
+    showChargerListForStatus(selectedStatus);
+  });
+}
+  
+function renderStatusPills(statusMap, onClickStatus) {
+  const container = document.getElementById('statusPills');
+  const rainbowColors = ['#ff0000', '#ff7f00', '#ffff00', '#00ff00', '#0000ff', '#4b0082', '#8f00ff'];
+
+  const labels = Object.keys(statusMap);
+  
+  // Add scrollable container styling with smaller padding
+  container.className = 'mt-2 flex gap-1 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 pb-1 max-w-full';
+  container.style.scrollbarWidth = 'thin';
+  
+  container.innerHTML = labels.map((label, i) => `
+    <button 
+      class="px-2 py-1 rounded-full text-white text-xs font-semibold whitespace-nowrap hover:scale-105 transition transform active:ring-2 active:ring-offset-1 flex-shrink-0"
+      style="background:${rainbowColors[i % rainbowColors.length]}"
+      data-status="${label}">
+      ${label}
+    </button>
+  `).join('');
+
+  // Add click handlers
+  Array.from(container.children).forEach(btn => {
+    btn.addEventListener('click', () => {
+      const selected = btn.dataset.status;
+      onClickStatus(selected);
     });
-  
-    renderStatusPills(byStatus, (selectedStatus) => {
-      showChargerListForStatus(selectedStatus);
-    });
-  }
-  
-  function renderStatusPills(statusMap, onClickStatus) {
-    const container = document.getElementById('statusPills');
-    const rainbowColors = ['#ff0000', '#ff7f00', '#ffff00', '#00ff00', '#0000ff', '#4b0082', '#8f00ff'];
-  
-    const labels = Object.keys(statusMap);
-    container.innerHTML = labels.map((label, i) => `
-      <button 
-        class="px-3 py-1 rounded-full text-white text-xs font-semibold whitespace-nowrap hover:scale-105 transition transform active:ring-2 active:ring-offset-1"
-        style="background:${rainbowColors[i % rainbowColors.length]}"
-        data-status="${label}">
-        ${label}
-      </button>
-    `).join('');
-  
-    // Add click handlers
-    Array.from(container.children).forEach(btn => {
-      btn.addEventListener('click', () => {
-        const selected = btn.dataset.status;
-        onClickStatus(selected);
-      });
-    });
-  }
+  });
+}
   
   function renderPublicMeter(stats) {
     const ctx = document.getElementById('publicMeter').getContext('2d');
@@ -300,19 +369,19 @@ import { loadSettings } from "../js/settings.js";
   function renderStatCards(stats, inventory) {
     const cards = [
       { label: 'Total Units', value: stats.total, key: 'total' },
-      { label: 'In Stock', value: stats.byStatus['In Stock'] || 0, key: 'In Stock' },
-      { label: 'Installed', value: stats.byStatus['Installed'] || 0, key: 'Installed' },
+      { label: 'In Stock', value: stats.inStockCount || 0, key: 'In Stock' },
+      { label: 'Installed', value: stats.installedCount || 0, key: 'Installed' },
       { label: 'With Contractors', value: stats.contractorCount, key: 'With Contractors' },
       { label: 'Overdue (>14d)', value: stats.overdueCount, key: 'Overdue' },
       { label: 'Public Assets', value: stats.publicCount, key: 'Public' }
     ];
     const container = document.getElementById('stat-cards');
     container.innerHTML = cards.map((c, i) => `
-      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-md p-4 flex flex-col animate-countup relative stat-card"
-           style="border-left: 8px solid ${rainbowColors[i % rainbowColors.length]};"
+      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-3 flex flex-col animate-countup relative stat-card"
+           style="border-left: 6px solid ${rainbowColors[i % rainbowColors.length]};"
            data-key="${c.key}">
-        <span class="text-sm font-medium text-gray-500 dark:text-gray-400">${c.label}</span>
-        <span class="text-2xl font-bold text-gray-900 dark:text-gray-100">${c.value}</span>
+        <span class="text-xs font-medium text-gray-500 dark:text-gray-400">${c.label}</span>
+        <span class="text-xl font-bold text-gray-900 dark:text-gray-100">${c.value}</span>
         <div class="stat-tooltip absolute z-10 left-1/2 -translate-x-1/2 mt-2 bg-gray-800 text-white text-xs rounded px-3 py-2 shadow-lg hidden whitespace-nowrap"></div>
       </div>
     `).join('');
@@ -411,19 +480,37 @@ function renderAgingAlerts(stats, inventory) {
     : '<li>No overdue items</li>';
 }
   
-function renderLocationBar(locStats, inventory) {
+async function renderLocationBar(locStats, inventory) {
   const ctx = document.getElementById('locationBar').getContext('2d');
   if (window.locationBarChart && typeof window.locationBarChart.destroy === 'function') {
     window.locationBarChart.destroy();
   }
-  const rainbowColors = [
-    'rgba(255,0,0,0.7)', 'rgba(255,127,0,0.7)', 'rgba(255,255,0,0.7)',
-    'rgba(0,255,0,0.7)', 'rgba(0,0,255,0.7)', 'rgba(75,0,130,0.7)', 'rgba(143,0,255,0.7)'
-  ];
+  
+  // Load settings to get parent container information
+  const settings = await loadSettings();
+  
+  // Sort locations by count (descending) and get top 10
+  const sortedLocations = Object.entries(locStats)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+  
+  const labels = sortedLocations.map(([loc]) => loc);
+  const data = sortedLocations.map(([_, count]) => count);
+  
+  // Map each location to its parent's color
+  const backgroundColors = labels.map(loc => {
+    const locationConfig = settings.locations.find(l => l.name === loc);
+    if (!locationConfig || !locationConfig.parent) return '#6b7280'; // Default gray
+    
+    const parentContainer = settings.parentContainers.find(p => p.id === locationConfig.parent);
+    return parentContainer?.color || '#6b7280';
+  });
+  
   const options = {
     indexAxis: 'y',
-    responsive: true,
-    maintainAspectRatio: false,
+    responsive: false,
+    maintainAspectRatio: true,
+    aspectRatio: 1,
     plugins: {
       legend: { display: false },
       tooltip: {
@@ -432,13 +519,29 @@ function renderLocationBar(locStats, inventory) {
           label: function(context) {
             const loc = context.label;
             const inv = context.chart.options.inventory || [];
+            
+            // Add parent container info to tooltip
+            const locationConfig = settings.locations.find(l => l.name === loc);
+            let parentInfo = "";
+            if (locationConfig && locationConfig.parent) {
+              const parent = settings.parentContainers.find(p => p.id === locationConfig.parent);
+              if (parent) {
+                parentInfo = ` (${parent.name})`;
+              }
+            }
+            
             // Group by model for this location
             const grouped = {};
             inv.filter(u => (u.location || 'Unknown') === loc).forEach(u => {
               const model = u.model || 'Unknown';
               grouped[model] = (grouped[model] || 0) + 1;
             });
-            return Object.entries(grouped).map(([model, qty]) => `${model}: ${qty}`).join(', ') || 'No data';
+            
+            const modelInfo = Object.entries(grouped)
+              .map(([model, qty]) => `${model}: ${qty}`)
+              .join(', ');
+              
+            return [`${loc}${parentInfo}`, modelInfo || 'No data'];
           }
         }
       },
@@ -446,7 +549,18 @@ function renderLocationBar(locStats, inventory) {
         anchor: 'end',
         align: 'right',
         color: '#6366f1',
-        font: { weight: 'bold', size: 14 }
+        font: { weight: 'bold', size: 12 }
+      }
+    },
+    scales: {
+      x: {
+        beginAtZero: true,
+        grid: { display: false },
+        ticks: { font: { size: 11 } }
+      },
+      y: {
+        grid: { display: false },
+        ticks: { font: { size: 11 } }
       }
     },
     onClick: function(evt, elements) {
@@ -457,21 +571,22 @@ function renderLocationBar(locStats, inventory) {
       }
     }
   };
+  
   // Inject inventory for tooltip callbacks
   options.inventory = inventory;
 
   window.locationBarChart = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: Object.keys(locStats),
+      labels: labels,
       datasets: [{
         label: 'Chargers by Location',
-        data: Object.values(locStats),
-        backgroundColor: Object.keys(locStats).map((_, i) => rainbowColors[i % rainbowColors.length]),
-        borderRadius: 12,
+        data: data,
+        backgroundColor: backgroundColors, // Use parent container colors
+        borderRadius: 8,
         borderSkipped: false,
-        barPercentage: 0.7,
-        categoryPercentage: 0.7
+        barPercentage: 0.8,
+        categoryPercentage: 0.9
       }]
     },
     options: options,
@@ -504,32 +619,47 @@ async function showChargerListForStatus(status) {
   dialog.showModal();
 }
   
-  function showChargerListForLocation(loc, inventory) {
-    let dialog = document.getElementById('chargerListDialog');
-    if (!dialog) {
-      dialog = document.createElement('dialog');
-      dialog.id = 'chargerListDialog';
-      dialog.className = 'rounded-xl p-5';
-      document.body.appendChild(dialog);
-    }
-    const chargers = inventory.filter(i => i.location === loc);
-    dialog.innerHTML = `
-      <div class="text-xl font-bold mb-2 text-purple-700 dark:text-purple-300">Chargers at ${loc}</div>
-      <div class="overflow-auto" style="max-height:350px">
-        ${chargers.map(i =>
-          `<div class="mb-2 p-2 bg-gray-50 dark:bg-gray-800 rounded shadow">
-            <div><b>ID:</b> ${i.chargerId}</div>
-            <div><b>Status:</b> ${i.status}</div>
-            <div><b>Model:</b> ${i.model}</div>
-          </div>`
-        ).join("")}
-      </div>
-      <div class="flex justify-end mt-4">
-        <button class="bg-purple-600 text-white px-4 py-2 rounded" onclick="document.getElementById('chargerListDialog').close()">Close</button>
-      </div>
-    `;
-    dialog.showModal();
+async function showChargerListForLocation(loc, inventory) {
+  let dialog = document.getElementById('chargerListDialog');
+  if (!dialog) {
+    dialog = document.createElement('dialog');
+    dialog.id = 'chargerListDialog';
+    dialog.className = 'rounded-xl p-5';
+    document.body.appendChild(dialog);
   }
+  
+  // Load settings to get parent container information
+  const settings = await loadSettings();
+  const chargers = inventory.filter(i => i.location === loc);
+  
+  // Get parent container info
+  const locationConfig = settings.locations.find(l => l.name === loc);
+  let parentInfo = "";
+  if (locationConfig && locationConfig.parent) {
+    const parent = settings.parentContainers.find(p => p.id === locationConfig.parent);
+    if (parent) {
+      parentInfo = `<div class="text-sm text-gray-500">Parent: ${parent.name}</div>`;
+    }
+  }
+  
+  dialog.innerHTML = `
+    <div class="text-xl font-bold mb-2 text-purple-700 dark:text-purple-300">Chargers at ${loc}</div>
+    ${parentInfo}
+    <div class="overflow-auto" style="max-height:350px">
+      ${chargers.map(i =>
+        `<div class="mb-2 p-2 bg-gray-50 dark:bg-gray-800 rounded shadow">
+          <div><b>ID:</b> ${i.chargerId}</div>
+          <div><b>Status:</b> ${i.status}</div>
+          <div><b>Model:</b> ${i.model}</div>
+        </div>`
+      ).join("")}
+    </div>
+    <div class="flex justify-end mt-4">
+      <button class="bg-purple-600 text-white px-4 py-2 rounded" onclick="document.getElementById('chargerListDialog').close()">Close</button>
+    </div>
+  `;
+  dialog.showModal();
+}
   
   function getLocationCounts(inventory) {
     const locCounts = {};

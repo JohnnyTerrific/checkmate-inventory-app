@@ -15,41 +15,40 @@ export const firebaseConfig = {
 const SETTINGS_KEY = "settings"; // Firestore doc id
 
 // Only show allowed statuses for each location
-export const allowedStatusesByLocation = {
-    "Back Warehouse":    ["In Stock","Faulty","RMA","Reserved","Demo","Loaner"],
-    "Enova Warehouse":   ["In Stock","Faulty","RMA","Reserved","Demo","Loaner"],
-    "Contractor/Technician": ["In Stock","Reserved","Loaner"],
-    "Customer Stock":    ["Installed (Wevo)","Installed (Retail)","Faulty"],
-    "Public":            ["Installed","Decommissioned","Faulty"]
+export const allowedStatusesByParent = {
+  "warehouse": ["In Stock", "Faulty", "RMA", "Reserved", "Demo", "Loaner"],
+  "contractor": ["In Stock", "Reserved", "Loaner"],
+  "customer": ["Installed (Wevo)", "Installed (Retail)", "Faulty"],
+  "public": ["Installed", "Decommissioned", "Faulty"],
+  "other": ["Unknown", "Lost", "In Transit", "Faulty"]
 };
+
+export function getAllowedStatusesForLocation(locationName, settings) {
+  // Find the location in settings
+  const location = settings.locations.find(loc => loc.name === locationName);
+  if (!location) return settings.statuses; // If location not found, allow all statuses
+  
+  // Get the parent container
+  const parentId = location.parent;
+  
+  // Return statuses allowed for this parent type
+  return allowedStatusesByParent[parentId] || settings.statuses;
+}
 
 export async function loadSettings() {
   const defaults = {
+    parentContainers: [
+      { id: "warehouse", name: "Warehouses", color: "#8b5cf6" },
+      { id: "customer", name: "Customer Locations", color: "#38bdf8" },
+      { id: "contractor", name: "Contractors", color: "#ef4444" },
+      { id: "public", name: "Public Locations", color: "#22c55e" },
+      { id: "other", name: "Other", color: "#f59e0b" }
+    ],
+    // Only include a minimal set of example locations
     locations: [
-      { name: "Back Warehouse",    parent: null },
-      { name: "Transworld - Shoham", parent: "Back Warehouse" },
-      { name: "Transworld - Ashdod", parent: "Back Warehouse" },
-
-      { name: "Enova Warehouse",   parent: null },
-      { name: "Level - 4 Storage", parent: "Enova Warehouse" },
-      { name: "Office Storage",    parent: "Enova Warehouse" },
-      { name: "Lab",               parent: "Enova Warehouse" },
-
-      { name: "Contractor/Technician", parent: null },
-      // specific contractors will be added via the UI
-
-      { name: "Customer Stock",  parent: null },
-      { name: "Installed (Wevo)",   parent: "Customer Stock" },
-      { name: "Installed (Retail)", parent: "Customer Stock" },
-
-      { name: "Public",                parent: null },
-      { name: "Public Chargers",       parent: "Public" },
-
-      { name: "Factory", parent: null },
-      { name: "Shipping", parent: null },
-      { name: "Port", parent: null },
-      { name: "Lost", parent: null },
-      { name: "Unknown", parent: "Lost" }
+      { name: "Main Warehouse", parent: "warehouse" },
+      { name: "Customer Site", parent: "customer" },
+      { name: "Public Location", parent: "public" }
     ],
     statuses: [
       "In Stock",
@@ -73,19 +72,20 @@ export async function loadSettings() {
       }
     ]
   };
+
   try {
     const docRef = doc(db, "appdata", SETTINGS_KEY);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
       const loaded = docSnap.data();
       return {
+        parentContainers: loaded.parentContainers || defaults.parentContainers, // Add this line
         locations: loaded.locations || defaults.locations,
         statuses: loaded.statuses || defaults.statuses,
         vendors: loaded.vendors || defaults.vendors,
         contractors: loaded.contractors || defaults.contractors
       };
     } else {
-      // No settings in Firestore, return defaults
       return defaults;
     }
   } catch (e) {
@@ -102,26 +102,68 @@ export async function saveSettings(data) {
   }
 }
 
+// Add this helper function to your settings.js
+export function getLocationsByParent(parentId, settings) {
+  if (!settings || !settings.locations) return [];
+  return settings.locations.filter(loc => loc.parent === parentId);
+}
+
+// And this one to get a parent container by ID
+export function getParentContainerById(parentId, settings) {
+  if (!settings || !settings.parentContainers) return null;
+  return settings.parentContainers.find(p => p.id === parentId);
+}
+
 export function getDashboardStats(inventory, shipments) {
+  // Load settings first
+  const settings = loadSettings();
+  
   const byStatus = {};
   let contractorCount = 0, overdueCount = 0, publicCount = 0;
+  let inStockCount = 0, installedCount = 0;
+  
   inventory.forEach(i => {
+    // Count by status
     byStatus[i.status] = (byStatus[i.status] || 0) + 1;
-    if (i.contractor) contractorCount++;
-    // Patch: count public by location or status
-    if (
-      (i.location && typeof i.location === "string" && i.location.toLowerCase().includes('public')) || 
-      (typeof i.status === "string" && i.status.toLowerCase().includes('public'))
-    ) publicCount++;
-    if (i.assignedDate && (Date.now() - new Date(i.assignedDate).getTime()) > 14 * 24 * 60 * 60 * 1000) overdueCount++;
+    
+    // Find location's parent container
+    const location = settings.locations?.find(loc => loc.name === i.location);
+    const parentId = location?.parent || "other";
+    
+    // Count by parent container type
+    if (parentId === "warehouse") {
+      inStockCount++;
+    } else if (parentId === "customer") {
+      installedCount++;
+    } else if (parentId === "contractor") {
+      contractorCount++;
+      
+      // Check if overdue (>14 days with contractor)
+      const now = Date.now();
+      const assignedDate = i.assignedDate ? new Date(i.assignedDate).getTime() : 0;
+      if (assignedDate && now - assignedDate > 14 * 24 * 60 * 60 * 1000) {
+        overdueCount++;
+      }
+    } else if (parentId === "public") {
+      publicCount++;
+    }
   });
+  
+  // Get next shipment date
+  const nextShipment = shipments && shipments.length 
+    ? shipments.sort((a,b) => new Date(a.eta) - new Date(b.eta))
+      .find(s => new Date(s.eta) > new Date())
+    : null;
+  
   return {
     total: inventory.length,
     byStatus,
     contractorCount,
     overdueCount,
     publicCount,
-    nextShipment: shipments.length ? Math.min(...shipments.map(s => new Date(s.date).getTime())) : null
+    inStockCount,
+    installedCount,
+    nextShipment: nextShipment ? new Date(nextShipment.eta).getTime() : null
   };
 }
 
@@ -211,31 +253,44 @@ function showConfirmDialog(msg) {
 // --- CRUD Handlers and Rendering ---
 let settings;
 function renderList(type, listId) {
-    const ul = document.getElementById(listId);
-    ul.innerHTML = "";
-    if (type === "locations") {
-      settings[type].forEach((item, idx) => {
-        let label = (typeof item === "object" && item.parent) ? `<span class="text-xs text-gray-500 ml-2">(${item.parent})</span>` : "";
-        ul.appendChild(createListItem(
-          (typeof item === "object" ? item.name : item) + label,
-          idx,
-          type,
-          i => onEditItem(type, i),
-          i => onDeleteItem(type, i)
-        ));
-      });
-    } else {
-      settings[type].forEach((item, idx) => {
-        ul.appendChild(createListItem(
-          item,
-          idx,
-          type,
-          i => onEditItem(type, i),
-          i => onDeleteItem(type, i)
-        ));
-      });
-    }
-  }  
+  const ul = document.getElementById(listId);
+  ul.innerHTML = "";
+  if (type === "locations") {
+    settings[type].forEach((item, idx) => {
+      // Find parent container name instead of using raw parent ID
+      let parentName = "";
+      if (item.parent) {
+        const parentContainer = settings.parentContainers?.find(p => p.id === item.parent);
+        if (parentContainer) {
+          parentName = `<span class="text-xs text-gray-500 ml-2" style="color:${parentContainer.color}">
+            (${parentContainer.name})
+          </span>`;
+        } else {
+          parentName = `<span class="text-xs text-gray-500 ml-2">(${item.parent})</span>`;
+        }
+      }
+      
+      ul.appendChild(createListItem(
+        item.name + (parentName || ""),
+        idx,
+        type,
+        i => onEditItem(type, i),
+        i => onDeleteItem(type, i)
+      ));
+    });
+  } else {
+    // Existing code for other types
+    settings[type].forEach((item, idx) => {
+      ul.appendChild(createListItem(
+        item,
+        idx,
+        type,
+        i => onEditItem(type, i),
+        i => onDeleteItem(type, i)
+      ));
+    });
+  }
+}  
   async function onAddItem(type, listId, label) {
     if (type === "locations") {
       showEntryWithParentDialog("Add Location").then(async (result) => {
@@ -260,40 +315,49 @@ function renderList(type, listId) {
     }
   }
 
-  function showEntryWithParentDialog(title, initValue = "", initParent = "") {
-    const parentOptions = settings.locations.map(loc => loc.name);
-    return new Promise(resolve => {
-      const dialog = document.getElementById("entryDialog");
-      dialog.innerHTML = `
-        <form method="dialog" class="flex flex-col gap-3">
-          <h3 class="font-bold">${title}</h3>
-          <input id="entryInput" type="text" class="border px-2 py-1 rounded" required autofocus placeholder="Location Name" value="${initValue}">
-          <select id="parentSelect" class="border px-2 py-1 rounded">
-            <option value="">-- Select Parent Stock --</option>
-            ${parentOptions.map(opt => `<option value="${opt}"${opt === initParent ? " selected" : ""}>${opt}</option>`).join("")}
+  // Replace the existing showEntryWithParentDialog function with this one:
+function showEntryWithParentDialog(title, initValue = "", initParent = "") {
+  return new Promise(resolve => {
+    const dialog = document.getElementById("entryDialog");
+    const parentOptions = settings.parentContainers || [];
+    
+    dialog.innerHTML = `
+      <form method="dialog" class="flex flex-col gap-3">
+        <h3 class="font-bold">${title}</h3>
+        <input id="entryInput" type="text" class="border px-2 py-1 rounded" required autofocus placeholder="Location Name" value="${initValue}">
+        <div>
+          <label class="block text-sm text-gray-600 dark:text-gray-300 mb-1">Parent Category</label>
+          <select id="parentSelect" class="border px-2 py-1 rounded w-full">
+            <option value="">-- Select Parent Container --</option>
+            ${parentOptions.map(opt => `
+              <option value="${opt.id}"${opt.id === initParent ? " selected" : ""}>
+                ${opt.name}
+              </option>
+            `).join("")}
           </select>
-          <div class="flex justify-end gap-2">
-            <button type="button" value="cancel" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
-            <button type="submit" value="ok" class="bg-purple-600 text-white px-3 py-1 rounded">Save</button>
-          </div>
-        </form>
-      `;
-      dialog.showModal();
-      const form = dialog.querySelector('form');
-      form.querySelector('button[value="cancel"]').onclick = () => {
-        dialog.close();
-        resolve(undefined);
-      };
-      form.onsubmit = e => {
-        e.preventDefault();
-        const value = dialog.querySelector("#entryInput").value.trim();
-        const parent = dialog.querySelector("#parentSelect").value;
-        if (!value || !parent) return;
-        dialog.close();
-        resolve({ value, parent });
-      };
-    });
-  }
+        </div>
+        <div class="flex justify-end gap-2">
+          <button type="button" value="cancel" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
+          <button type="submit" value="ok" class="bg-purple-600 text-white px-3 py-1 rounded">Save</button>
+        </div>
+      </form>
+    `;
+    dialog.showModal();
+    const form = dialog.querySelector('form');
+    form.querySelector('button[value="cancel"]').onclick = () => {
+      dialog.close();
+      resolve(undefined);
+    };
+    form.onsubmit = e => {
+      e.preventDefault();
+      const value = dialog.querySelector("#entryInput").value.trim();
+      const parent = dialog.querySelector("#parentSelect").value;
+      if (!value || !parent) return;
+      dialog.close();
+      resolve({ value, parent });
+    };
+  });
+}
   
   async function onEditItem(type, idx) {
     if (type === "locations") {
@@ -435,17 +499,162 @@ function showContractorDialog(init = {}) {
   });
 }
 
+function renderParentContainerList() {
+  const ul = document.getElementById("parentContainerList");
+  if (!ul) return;
+  ul.innerHTML = "";
+  
+  if (!Array.isArray(settings.parentContainers)) {
+    settings.parentContainers = [];
+  }
 
-// --- Wire Everything ---
+  settings.parentContainers.forEach((item, idx) => {
+    const li = document.createElement('li');
+    li.className = "flex items-center justify-between px-3 py-2 rounded bg-blue-200 dark:bg-gray-700 hover:bg-blue-300 dark:hover:bg-gray-600 transition group cursor-grab text-gray-900 dark:text-gray-100 mb-2";
+    li.draggable = true;
+    li.innerHTML = `
+      <div class="flex items-center gap-2">
+        <span class="w-4 h-4 rounded-full" style="background-color: ${item.color || '#6b7280'}"></span>
+        <span class="font-medium">${item.name}</span>
+        <span class="text-xs text-gray-500">(${item.id})</span>
+      </div>
+      <div class="flex gap-2 items-center">
+        <button class="edit-btn text-blue-400 hover:text-blue-300 transition" title="Edit">&#9998;</button>
+        <button class="delete-btn text-red-400 hover:text-red-300 transition" title="Delete">&times;</button>
+        <span class="drag-icon cursor-grab text-gray-400 group-hover:text-gray-200 transition">&#9776;</span>
+      </div>
+    `;
+    
+    // Add event listeners similar to other lists
+    li.addEventListener('dragstart', e => {
+      e.dataTransfer.setData("index", idx);
+      e.dataTransfer.setData("listType", "parentContainers");
+    });
+    li.addEventListener('dragover', e => e.preventDefault());
+    li.addEventListener('drop', e => {
+      e.preventDefault();
+      const fromIdx = +e.dataTransfer.getData("index");
+      const fromListType = e.dataTransfer.getData("listType");
+      if (fromListType !== "parentContainers") return;
+      if (fromIdx !== idx) {
+        reorderItem("parentContainers", fromIdx, idx);
+      }
+    });
+    
+    // Button events
+    li.querySelector('.edit-btn').onclick = () => onEditParentContainer(idx);
+    li.querySelector('.delete-btn').onclick = () => onDeleteParentContainer(idx);
+    
+    ul.appendChild(li);
+  });
+}
+
+function showParentContainerDialog(title, init = {}) {
+  return new Promise(resolve => {
+    const dialog = document.getElementById("entryDialog");
+    dialog.innerHTML = `
+      <form method="dialog" class="flex flex-col gap-3">
+        <h3 class="font-bold">${title}</h3>
+        <div>
+          <label class="block text-sm text-gray-600 dark:text-gray-300 mb-1">ID (for reference)</label>
+          <input id="containerId" type="text" class="w-full border px-2 py-1 rounded" 
+                 value="${init.id || ''}" required placeholder="warehouse, customer, etc">
+        </div>
+        <div>
+          <label class="block text-sm text-gray-600 dark:text-gray-300 mb-1">Display Name</label>
+          <input id="containerName" type="text" class="w-full border px-2 py-1 rounded" 
+                 value="${init.name || ''}" required placeholder="Warehouses, Public Locations, etc">
+        </div>
+        <div>
+          <label class="block text-sm text-gray-600 dark:text-gray-300 mb-1">Color</label>
+          <input id="containerColor" type="color" class="w-full border px-2 py-1 rounded" 
+                 value="${init.color || '#6b7280'}">
+        </div>
+        <div class="flex justify-end gap-2">
+          <button type="button" value="cancel" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
+          <button type="submit" value="ok" class="bg-purple-600 text-white px-3 py-1 rounded">Save</button>
+        </div>
+      </form>
+    `;
+    dialog.showModal();
+    const form = dialog.querySelector('form');
+    form.querySelector('button[value="cancel"]').onclick = () => {
+      dialog.close();
+      resolve(undefined);
+    };
+    form.onsubmit = e => {
+      e.preventDefault();
+      resolve({
+        id: dialog.querySelector("#containerId").value.trim(),
+        name: dialog.querySelector("#containerName").value.trim(),
+        color: dialog.querySelector("#containerColor").value
+      });
+      dialog.close();
+    };
+  });
+}
+
+async function onAddParentContainer() {
+  showParentContainerDialog("Add Parent Container").then(async result => {
+    if (!result) return;
+    const { id, name, color } = result;
+    if (!id || !name) return;
+    if (!Array.isArray(settings.parentContainers)) settings.parentContainers = [];
+    settings.parentContainers.push({ id, name, color });
+    await saveSettings(settings);
+    renderParentContainerList();
+    showToast("Parent container added!", "green");
+  });
+}
+
+async function onEditParentContainer(idx) {
+  const current = settings.parentContainers[idx];
+  showParentContainerDialog("Edit Parent Container", current).then(async result => {
+    if (!result) return;
+    const { id, name, color } = result;
+    if (!id || !name) return;
+    settings.parentContainers[idx] = { id, name, color };
+    await saveSettings(settings);
+    renderParentContainerList();
+    showToast("Parent container updated!", "blue");
+  });
+}
+
+async function onDeleteParentContainer(idx) {
+  // Check if this parent is in use by any locations
+  const locationsUsingParent = settings.locations.filter(
+    loc => loc.parent === settings.parentContainers[idx].id
+  );
+  
+  if (locationsUsingParent.length > 0) {
+    return showToast(
+      `Cannot delete - ${locationsUsingParent.length} locations are using this parent!`, 
+      "red"
+    );
+  }
+  
+  showConfirmDialog(`Delete this parent container? This will not affect locations.`).then(async ok => {
+    if (!ok) return;
+    settings.parentContainers.splice(idx, 1);
+    await saveSettings(settings);
+    renderParentContainerList();
+    showToast("Parent container deleted!", "red");
+  });
+}
+
+
 export async function initSettings() {
   settings = await loadSettings();
+  renderParentContainerList();
   renderList("locations", "locList");
   renderList("statuses", "statList");
   renderList("vendors", "vendorList");
   renderContractorList();
 
-  document.getElementById("addContractorBtn").onclick = onAddContractor;
-  document.getElementById("addLocBtn").onclick = () => onAddItem("locations", "locList", "Location");
-  document.getElementById("addStatBtn").onclick = () => onAddItem("statuses", "statList", "Status");
-  document.getElementById("addVendorBtn").onclick = () => onAddItem("vendors", "vendorList", "Vendor");
+  // Add the new button handler
+  document.getElementById("addParentContainerBtn")?.addEventListener("click", onAddParentContainer);
+  document.getElementById("addContractorBtn")?.addEventListener("click", onAddContractor);
+  document.getElementById("addLocBtn")?.addEventListener("click", () => onAddItem("locations", "locList", "Location"));
+  document.getElementById("addStatBtn")?.addEventListener("click", () => onAddItem("statuses", "statList", "Status"));
+  document.getElementById("addVendorBtn")?.addEventListener("click", () => onAddItem("vendors", "vendorList", "Vendor"));
 }
