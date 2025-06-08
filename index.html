@@ -8,9 +8,73 @@
   <script>tailwind.config = { darkMode: 'class' }</script>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="/assets/css/style.css" />
-  <style> body { visibility: hidden; } </style>
+  <style> 
+    body { visibility: hidden; } 
+    
+    /* Loading animation styles */
+    .loading-pulse {
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { 
+        opacity: 0.4; 
+        transform: scale(0.95);
+      }
+      50% { 
+        opacity: 1; 
+        transform: scale(1.05);
+      }
+    }
+    
+    .loading-dots {
+      animation: loadingDots 1.4s ease-in-out infinite;
+    }
+    
+    @keyframes loadingDots {
+      0%, 80%, 100% { 
+        opacity: 0; 
+      }
+      40% { 
+        opacity: 1; 
+      }
+    }
+    
+    .loading-dots:nth-child(1) { animation-delay: -0.32s; }
+    .loading-dots:nth-child(2) { animation-delay: -0.16s; }
+    .loading-dots:nth-child(3) { animation-delay: 0s; }
+  </style>
 </head>
 <body data-page="home">
+  <!-- Loading Screen -->
+  <div id="loadingScreen" class="fixed inset-0 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 flex items-center justify-center z-50">
+    <div class="text-center">
+      <!-- Pulsating Logo -->
+      <div class="loading-pulse mb-8">
+        <div class="w-24 h-24 mx-auto bg-white rounded-2xl flex items-center justify-center shadow-2xl">
+          <svg class="w-16 h-16 text-purple-600" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+      </div>
+      
+      <!-- Loading Text -->
+      <h2 class="text-3xl font-bold text-white mb-4">CheckMate</h2>
+      <p class="text-purple-200 text-lg mb-8">Loading Executive Dashboard</p>
+      
+      <!-- Loading Dots -->
+      <div class="flex justify-center space-x-2">
+        <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+        <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+        <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+      </div>
+      
+      <!-- Progress Text -->
+      <p id="loadingProgress" class="text-purple-300 mt-6 text-sm">Initializing...</p>
+    </div>
+  </div>
+
+  <!-- Main Content -->
   <main id="main-content-area" class="p-4 md:p-6 lg:p-8">
     <section id="index-main" class="max-w-7xl mx-auto py-4 space-y-8">
       <!-- Executive KPI Cards -->

@@ -5,6 +5,24 @@ import { loadInventory } from './inventory.js';
 import { loadSettings } from './settings.js';
 import { loadAuditLog } from './inventory.js';
 
+function updateLoadingProgress(message) {
+  const progressElement = document.getElementById('loadingProgress');
+  if (progressElement) {
+    progressElement.textContent = message;
+  }
+}
+
+function hideLoadingScreen() {
+  const loadingScreen = document.getElementById('loadingScreen');
+  if (loadingScreen) {
+    loadingScreen.style.opacity = '0';
+    loadingScreen.style.transition = 'opacity 0.5s ease-out';
+    setTimeout(() => {
+      loadingScreen.style.display = 'none';
+    }, 500);
+  }
+}
+
 onAuthStateChanged(auth, user => {
   if (!user) {
     window.location.href = "/login.html";
@@ -16,6 +34,8 @@ onAuthStateChanged(auth, user => {
 
 async function initializeIndexPageContent() {
   try {
+    console.log('Starting dashboard initialization...');
+    
     // Load all necessary data
     const [products, inventory, settings, auditLog] = await Promise.all([
       loadProducts(),
@@ -24,18 +44,33 @@ async function initializeIndexPageContent() {
       loadAuditLog()
     ]);
 
+    console.log('Data loaded:', {
+      products: products.length,
+      inventory: inventory.length,
+      settings: !!settings,
+      auditLog: auditLog.length
+    });
+
     window.inventory = inventory;
 
     // Create comprehensive business intelligence
     const businessMetrics = await calculateBusinessMetrics(inventory, products, settings, auditLog);
     
-    // Render executive dashboard
+    console.log('Business metrics calculated:', businessMetrics);
+    
+    // Render executive dashboard with delays to prevent conflicts
     renderExecutiveKPIs(businessMetrics);
-    renderAssetDistributionChart(businessMetrics);
-    renderDeploymentPipeline(businessMetrics.pipeline);
-    renderDepreciationAnalysis(businessMetrics.depreciation);
-    renderAssetHealthMetrics(businessMetrics.health);
-    renderGrowthTrajectory(businessMetrics.growth);
+    
+    setTimeout(() => {
+      renderAssetDistributionChart(businessMetrics);
+    }, 100);
+    
+    setTimeout(() => {
+      renderDeploymentPipeline(businessMetrics.pipeline);
+      renderDepreciationAnalysis(businessMetrics.depreciation);
+      renderAssetHealthMetrics(businessMetrics.health);
+      renderGrowthTrajectory(businessMetrics.growth);
+    }, 200);
     
   } catch (error) {
     console.error("Error initializing index page:", error);
@@ -131,11 +166,26 @@ async function calculateBusinessMetrics(inventory, products, settings, auditLog)
     const product = productMap[unit.model] || productMap[unit.product];
     const value = parseFloat(product?.price) || 0;
     
-    // Find location parent using combined locations
+    console.log('Processing unit:', {
+      chargerId: unit.chargerId,
+      model: unit.model,
+      product: unit.product,
+      location: unit.location,
+      foundProduct: product,
+      price: product?.price,
+      parsedValue: value
+    });
+    
     const locationObj = allLocations.find(loc => loc.name === unit.location);
     const parentId = locationObj?.parent || "other";
     
-    // Categorize by business impact
+  
+    console.log('Location mapping:', {
+      unitLocation: unit.location,
+      foundLocationObj: locationObj,
+      parentId: parentId
+    });
+    
     if (parentId === "customer" || parentId === "public" || 
         unit.status?.includes("Installed")) {
       // Revenue-generating assets
@@ -143,33 +193,7 @@ async function calculateBusinessMetrics(inventory, products, settings, auditLog)
       metrics.financial.revenueAssets.value += value;
       metrics.pipeline.deployed.push(unit);
       
-      // Count market expansion
-      if (parentId === "public" || unit.status?.includes("Public")) {
-        metrics.strategic.marketExpansion.publicInstallations++;
-      } else {
-        metrics.strategic.marketExpansion.customerInstallations++;
-      }
-      
-      // Calculate depreciation for deployed assets
-      if (unit.installedDate || unit.lastAction) {
-        const depreciationRate = parseFloat(product?.depreciationRate) / 100 || 0.15;
-        const installDate = new Date(unit.installedDate || unit.lastAction);
-        const years = (now - installDate) / (365.25 * 24 * 3600 * 1000);
-        const currentValue = value * Math.pow(1 - depreciationRate, Math.max(0, years));
-        
-        metrics.depreciation.totalOriginal += value;
-        metrics.depreciation.totalCurrent += currentValue;
-        metrics.depreciation.assets.push({
-          chargerId: unit.chargerId,
-          model: unit.model,
-          installDate: installDate.toLocaleDateString(),
-          originalValue: value,
-          currentValue: currentValue,
-          location: unit.location,
-          parentType: parentId,
-          yearsDeployed: years.toFixed(1)
-        });
-      }
+      console.log('Added to revenue assets:', unit.chargerId);
       
     } else if (parentId === "warehouse") {
       // Idle inventory - cash tied up
@@ -177,15 +201,20 @@ async function calculateBusinessMetrics(inventory, products, settings, auditLog)
       metrics.financial.idleInventory.value += value;
       metrics.pipeline.warehouse.push(unit);
       
+      console.log('Added to idle inventory:', unit.chargerId);
+      
     } else if (parentId === "contractor") {
       // In transit - being deployed
       metrics.financial.inTransit.count++;
       metrics.financial.inTransit.value += value;
       metrics.pipeline.contractor.push(unit);
       
+      console.log('Added to in transit:', unit.chargerId);
+      
     } else {
       metrics.pipeline.unknown.push(unit);
-    }
+      console.log('Added to unknown:', unit.chargerId, 'parentId:', parentId);
+    }  
     
     // Asset health tracking
     if (unit.status === "Faulty") {
@@ -325,24 +354,51 @@ function renderExecutiveKPIs(metrics) {
 
 function renderAssetDistributionChart(metrics) {
   const container = document.getElementById('assetDonut');
-  if (!container) return;
+  if (!container) {
+    console.error('Canvas element with ID "assetDonut" not found');
+    return;
+  }
   
   const ctx = container.getContext('2d');
   
-  // Clear any existing charts
-  if (window.valueChart && typeof window.valueChart.destroy === 'function') {
-    window.valueChart.destroy();
+  // Destroy any existing chart instance more safely
+  if (window.assetChart) {
+    try {
+      window.assetChart.destroy();
+    } catch (e) {
+      console.warn('Error destroying previous chart:', e);
+    }
   }
   
+  // Use count data since value data is all 0
   const data = [
-    metrics.financial.revenueAssets.value,
-    metrics.financial.idleInventory.value,
-    metrics.financial.inTransit.value
+    metrics.financial?.revenueAssets?.count || 0,
+    metrics.financial?.idleInventory?.count || 0,
+    metrics.financial?.inTransit?.count || 0
   ];
   
   const totalValue = data.reduce((sum, val) => sum + val, 0);
+
+  console.log('Chart data:', {
+    revenueAssets: metrics.financial?.revenueAssets?.count || 0,
+    idleInventory: metrics.financial?.idleInventory?.count || 0,
+    inTransit: metrics.financial?.inTransit?.count || 0,
+    totalValue,
+    data
+  });
+    
+  // If no data, show a placeholder
+  if (totalValue === 0) {
+    ctx.clearRect(0, 0, container.width, container.height);
+    ctx.fillStyle = '#9ca3af';
+    ctx.font = '16px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('No asset data available', container.width / 2, container.height / 2);
+    return;
+  }
   
-  window.valueChart = new Chart(ctx, {
+  // Create new chart with unique variable name
+  window.assetChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
       labels: ['Revenue Assets', 'Idle Inventory', 'In Transit'],
@@ -358,16 +414,15 @@ function renderAssetDistributionChart(metrics) {
       }]
     },
     options: {
-      cutout: '60%',
       responsive: true,
       maintainAspectRatio: false,
-      layout: {
-        padding: 20
+      animation: {
+        duration: 1000 // Add animation duration
       },
       plugins: {
         title: {
           display: true,
-          text: `Total Asset Value: $${totalValue.toLocaleString()}`,
+          text: `Total Units: ${totalValue}`,
           font: { size: 18, weight: 'bold' },
           padding: {
             bottom: 15
@@ -398,13 +453,15 @@ function renderAssetDistributionChart(metrics) {
             label: function(context) {
               const value = context.raw;
               const percent = totalValue > 0 ? Math.round(value / totalValue * 100) : 0;
-              return `${context.label}: $${value.toLocaleString()} (${percent}%)`;
+              return `${context.label}: ${value} units (${percent}%)`;
             }
           }
         }
       }
     }
   });
+  
+  console.log('Chart created successfully:', window.assetChart);
 }
 
 function renderDeploymentPipeline(pipeline) {
