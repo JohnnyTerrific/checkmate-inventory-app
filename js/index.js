@@ -5,6 +5,24 @@ import { loadInventory } from './inventory.js';
 import { loadSettings } from './settings.js';
 import { loadAuditLog } from './inventory.js';
 
+function checkMobileAndRedirect() {
+  const isMobile = window.innerWidth < 768; // Mobile breakpoint
+  if (isMobile) {
+    console.log('Mobile device detected, redirecting to inventory page');
+    window.location.href = "/inventory.html";
+    return true; // Return true if redirecting
+  }
+  return false; // Return false if staying on page
+}
+
+// Loading progress helper
+function updateLoadingProgress(message) {
+  const progressElement = document.getElementById('loadingProgress');
+  if (progressElement) {
+    progressElement.textContent = message;
+  }
+}
+
 function updateLoadingProgress(message) {
   const progressElement = document.getElementById('loadingProgress');
   if (progressElement) {
