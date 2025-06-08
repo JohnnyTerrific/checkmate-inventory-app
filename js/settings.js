@@ -114,7 +114,7 @@ export function getParentContainerById(parentId, settings) {
   return settings.parentContainers.find(p => p.id === parentId);
 }
 
-export function getDashboardStats(inventory, shipments) {
+export async function getDashboardStats(inventory, shipments) {
   // Load settings first
   const settings = loadSettings();
   

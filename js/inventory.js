@@ -539,7 +539,6 @@ async function getStatusesForLocation(loc) {
       return;
     }
     main.innerHTML = `
-      <h2 class="text-2xl font-bold mb-4">Inventory Units</h2>
       <div class="flex flex-wrap gap-3 mb-4 items-center">
         <input id="searchInput" type="text" placeholder="Search Anything" class="border px-3 py-1 rounded" style="min-width:200px;">
         <select id="filterStatus" class="border px-3 py-1 rounded">
@@ -575,9 +574,37 @@ async function getStatusesForLocation(loc) {
       <div id="paginationBar"></div>
     `;
 
-  // Download buttons
-  main.querySelector('#downloadCSV').onclick = () => window.downloadInventoryCSV();
-  main.querySelector('#downloadExcel').onclick = () => window.downloadInventoryExcel();
+// Download buttons - with better error handling
+setTimeout(() => {
+  const csvBtn = main.querySelector('#downloadCSV');
+  const excelBtn = main.querySelector('#downloadExcel');
+  
+  if (csvBtn) {
+    csvBtn.onclick = (e) => {
+      e.preventDefault();
+      console.log('CSV download clicked');
+      if (typeof window.downloadInventoryCSV === 'function') {
+        window.downloadInventoryCSV();
+      } else {
+        console.error('downloadInventoryCSV function not found');
+        showToast('Download function not available', 'red');
+      }
+    };
+  }
+
+  if (excelBtn) {
+    excelBtn.onclick = (e) => {
+      e.preventDefault();
+      console.log('Excel download clicked');
+      if (typeof window.downloadInventoryExcel === 'function') {
+        window.downloadInventoryExcel();
+      } else {
+        console.error('downloadInventoryExcel function not found');
+        showToast('Download function not available', 'red');
+      }
+    };
+  }
+}, 100);
 
   injectInventoryFABs();
   
@@ -1087,34 +1114,6 @@ function addMobileSwipeHandlers() {
         </div>
       `;
     }
-  
-  // Add at end of inventory.js, simple CSV export:
-  async function downloadInventoryCSV() {
-    const items = [...window.inventory];
-    const header = ["Charger ID", "Serial", "Status", "Location", "Last Action"];
-    const rows = items.map(i => [i.chargerId, i.chargerSerial, i.status, i.location, i.lastAction]);
-    let csv = header.join(",") + "\n" + rows.map(r => r.join(",")).join("\n");
-    let blob = new Blob([csv], {type: "text/csv"});
-    let url = URL.createObjectURL(blob);
-    let a = document.createElement("a");
-    a.href = url;
-    a.download = "inventory.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-  async function downloadInventoryExcel() {
-    const items = [...window.inventory];
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(items);
-    XLSX.utils.book_append_sheet(wb, ws, "Inventory");
-    XLSX.writeFile(wb, "inventory.xlsx");
-  }
-  
-  function clearSelection() {
-    window.selectedUnits = [];
-    renderBulkActionBar();
-    renderInventoryTable(document.getElementById('main-content'));
-  }
 
   window.openBulkMoveDialog = async function() {
     const selected = window.inventory.filter(i => window.selectedUnits.includes(i.chargerId));
@@ -1195,10 +1194,12 @@ function addMobileSwipeHandlers() {
     
       if (
         (isStorage(currentLocation) || installedLocations.includes(currentLocation)) &&
-        !contractorLocationsNames.includes(moveLoc)
+        !contractorLocationsNames.includes(moveLoc) &&
+        !haveSameParent(currentLocation, moveLoc, locations) &&
+        !isAdmin() // Super admin bypass
       ) {
         dialog.querySelector("#formError").textContent =
-          "You can only move units from warehouse/installed to a Contractor/Technician location.";
+          "You can only move units from warehouse/installed to a Contractor/Technician location, unless moving within the same warehouse group.";
         return;
       }
     
@@ -1516,38 +1517,11 @@ window.toggleActionsMenu = function(idx) {
     };
   };
 
-
-  async function getAllowedMoveDestinations(currentLocation) {
-    const settings = await loadSettings();
-    const locations = settings.locations;
-    const current = locations.find(l => l.name === currentLocation);
-    if (!current) return [];
-  
-    // Infer type if not present
-    const getType = loc => loc.type ||
-      (loc.name.match(/warehouse|stock/i) ? "Storage" :
-       loc.name.match(/assigned|technician|contractor/i) ? "Technician" :
-       loc.name.match(/installed|customer/i) ? "Installed" :
-       "Other");
-  
-    const currentType = getType(current);
-  
-    if (currentType === "Storage") {
-      // Can move to any Technician/Contractor
-      return locations.filter(l => getType(l) === "Technician" || getType(l) === "Contractor");
-    }
-    if (currentType === "Technician" || currentType === "Contractor") {
-      // Can move to Installed or Storage
-      return locations.filter(l => getType(l) === "Installed" || getType(l) === "Storage");
-    }
-    if (currentType === "Installed") {
-      // Can move to Technician/Contractor or Storage
-      return locations.filter(l => getType(l) === "Technician" || getType(l) === "Contractor" || getType(l) === "Storage");
-    }
-    // Fallback: allow parent/children as before
-    let children = locations.filter(l => l.parent === currentLocation);
-    let parent = current.parent ? [locations.find(l => l.name === current.parent)] : [];
-    return [...children, ...parent].filter(Boolean);
+  function haveSameParent(locA, locB, locations) {
+    if (!locA || !locB) return false;
+    const a = locations.find(l => l.name === locA);
+    const b = locations.find(l => l.name === locB);
+    return a && b && a.parent && b.parent && a.parent === b.parent;
   }
   
   // Update openMoveDialog to use getAllowedMoveDestinations:
@@ -1569,19 +1543,34 @@ window.toggleActionsMenu = function(idx) {
       isStorage(currentLocation) ||
       installedLocations.includes(currentLocation)
     ) {
-      options = (contractorLocations || []).map(l =>
+      // Add warehouse siblings first
+      const currentObj = locations.find(l => l.name === currentLocation);
+      const warehouseLocations = locations.filter(l => 
+        l.parent === "warehouse" && l.name !== currentLocation
+      );
+      
+      options = warehouseLocations.map(l =>
+        `<option value="${l.name}">${l.name} (Warehouse)</option>`
+      ).join("");
+      
+      // Then add contractors
+      options += (contractorLocations || []).map(l =>
         `<option value="${l.name}">${l.name}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
       ).join("");
     } else if ((contractorLocations || []).map(l => l.name).includes(currentLocation)) {
+      // From contractor location - can go to warehouses or installed locations
+      options = (locations || [])
+        .filter(l => l.name !== currentLocation && (l.parent === "warehouse" || installedLocations.includes(l.name)))
+        .map(l =>
+          `<option value="${l.name}">${l.name}${l.parent ? ` (${l.parent})` : ""}</option>`
+        ).join("");
+    } else {
+      // Default case - show all available locations except current
       options = (locations || [])
         .filter(l => l.name !== currentLocation)
         .map(l =>
-          `<option value="${l.name}">${l.name}${l.parent && !l.isContractor ? ` (${l.parent})` : ""}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
+          `<option value="${l.name}">${l.name}${l.parent ? ` (${l.parent})` : ""}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
         ).join("");
-    } else {
-      options = (contractorLocations || []).map(l =>
-        `<option value="${l.name}">${l.name}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
-      ).join("");
     }
   
     dialog.innerHTML = `
@@ -1802,37 +1791,19 @@ window.toggleActionsMenu = function(idx) {
         <input id="editProduct" type="text" class="border px-2 py-1 rounded" value="${unit.product || ''}" placeholder="Product">
         <input id="editModel" type="text" class="border px-2 py-1 rounded" value="${unit.model || ''}" placeholder="Model">
         <select id="editLocation" required class="border px-2 py-1 rounded">
-  <option value="">-- Select Location --</option>
   ${(() => {
-    const contractorLocations = locations.filter(l =>
-      l.parent === "Contractor/Technician"
-    );
-    const installedLocations = ["Customer Stock", "Public Network Stock"];
     const currentLocation = unit.location;
-    if (currentLocation === "Back Warehouse" || installedLocations.includes(currentLocation)) {
-      return contractorLocations.map(l =>
-        `<option value="${l.name}"${unit.location === l.name ? " selected" : ""}>
-          ${l.name}${getContractorContactInfo(l.name)}
-        </option>`
-      ).join("");
-    } else if (contractorLocations.map(l => l.name).includes(currentLocation)) {
-      return locations
-        .filter(l =>
-          l.name === "Back Warehouse" ||
-          installedLocations.includes(l.name)
-        )
-        .map(l =>
-          `<option value="${l.name}"${unit.location === l.name ? " selected" : ""}>
-            ${l.name}${l.parent ? ` (${l.parent})` : ""}
-          </option>`
-        ).join("");
-    } else {
-      return contractorLocations.map(l =>
-        `<option value="${l.name}"${unit.location === l.name ? " selected" : ""}>
-          ${l.name}${getContractorContactInfo(l.name)}
-        </option>`
-      ).join("");
-    }
+    
+    // Always include current location first as selected
+    let options = `<option value="${currentLocation}" selected>${currentLocation}</option>`;
+    
+    // Add all other locations except current
+    const otherLocations = locations.filter(l => l.name !== currentLocation);
+    options += otherLocations.map(l =>
+      `<option value="${l.name}">${l.name}${l.parent ? ` (${l.parent})` : ""}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
+    ).join("");
+    
+    return options;
   })()}
 </select>
         <select id="editStatus" required class="border px-2 py-1 rounded">
@@ -2455,7 +2426,7 @@ window.openBarcodeScanner = function(onDetected) {
 export async function updateUnitsLocation(unitIds, newLocation) {
   let items = [...window.inventory];
   unitIds.forEach(id => {
-    const unit = window.inventory.find(i => i.chargerId === chargerId);
+    const unit = window.inventory.find(i => i.chargerId === id);
     if (unit) {
       unit.location = newLocation;
       unit.lastAction = new Date().toISOString();
@@ -2490,7 +2461,30 @@ window.openBarcodeScanner = openBarcodeScanner;
 window.performGlobalSearch = performGlobalSearch;
 window.openGlobalSearchDialog = openGlobalSearchDialog;
 window.openAssignContractorDialog = openAssignContractorDialog;
-window.downloadInventoryCSV = downloadInventoryCSV;
-window.downloadInventoryExcel = downloadInventoryExcel;
+window.downloadInventoryCSV = function() {
+  const items = [...window.inventory];
+  const header = ["Charger ID", "Serial", "Status", "Location", "Last Action"];
+  const rows = items.map(i => [i.chargerId, i.chargerSerial || '', i.status, i.location, i.lastAction]);
+  let csv = header.join(",") + "\n" + rows.map(r => r.join(",")).join("\n");
+  let blob = new Blob([csv], {type: "text/csv"});
+  let url = URL.createObjectURL(blob);
+  let a = document.createElement("a");
+  a.href = url;
+  a.download = "inventory.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+window.downloadInventoryExcel = function() {
+  if (typeof XLSX === 'undefined') {
+    showToast('Excel library not loaded', 'red');
+    return;
+  }
+  const items = [...window.inventory];
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(items);
+  XLSX.utils.book_append_sheet(wb, ws, "Inventory");
+  XLSX.writeFile(wb, "inventory.xlsx");
+};
   
 

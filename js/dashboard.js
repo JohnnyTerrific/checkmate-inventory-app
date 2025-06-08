@@ -11,7 +11,6 @@ function injectDashboardPage() {
   document.getElementById('main-content').innerHTML = `
     <section class="max-w-7xl mx-auto px-3 py-3 space-y-4">
       <header class="flex items-center justify-between">
-        <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
        </header>
 
        <!-- 1️⃣ KPI CARDS -->
@@ -369,11 +368,11 @@ function renderStatusPills(statusMap, onClickStatus) {
   function renderStatCards(stats, inventory) {
     const cards = [
       { label: 'Total Units', value: stats.total, key: 'total' },
-      { label: 'In Stock', value: stats.inStockCount || 0, key: 'In Stock' },
-      { label: 'Installed', value: stats.installedCount || 0, key: 'Installed' },
-      { label: 'With Contractors', value: stats.contractorCount, key: 'With Contractors' },
-      { label: 'Overdue (>14d)', value: stats.overdueCount, key: 'Overdue' },
-      { label: 'Public Assets', value: stats.publicCount, key: 'Public' }
+      { label: 'In Stock', value: stats.inStockCount || 0, key: 'inStockCount' },
+      { label: 'Installed', value: stats.installedCount || 0, key: 'installedCount' },
+      { label: 'With Contractors', value: stats.contractorCount || 0, key: 'contractorCount' },
+      { label: 'Overdue (>14d)', value: stats.overdueCount || 0, key: 'overdueCount' },
+      { label: 'Public Assets', value: stats.publicCount || 0, key: 'publicCount' }
     ];
     const container = document.getElementById('stat-cards');
     container.innerHTML = cards.map((c, i) => `
@@ -399,28 +398,32 @@ function renderStatusPills(statusMap, onClickStatus) {
             modelCounts[m] = (modelCounts[m] || 0) + 1;
           });
         } else if (
-          key === 'In Stock' ||
-          key === 'Installed' || // <-- Added Installed here
-          key === 'With Contractors' ||
-          key === 'Public'
+          key === 'inStockCount' ||
+          key === 'installedCount' ||
+          key === 'contractorCount' ||
+          key === 'publicCount'
         ) {
           let filterFn;
-          if (key === 'In Stock') filterFn = u => u.status === 'In Stock';
-          else if (key === 'Installed') filterFn = u => u.status === 'Installed'; // <-- Added Installed filter
-          else if (key === 'With Contractors') filterFn = u => !!u.contractor;
-          else if (key === 'Public') filterFn = u => (u.location && u.location.toLowerCase().includes('public'));
+          if (key === 'inStockCount') filterFn = u => u.status === 'In Stock';
+          else if (key === 'installedCount') filterFn = u => u.status === 'Installed';
+          else if (key === 'contractorCount') {
+            // Use parent container logic for contractors
+            filterFn = u => {
+              // You may need to load settings here if not already available
+              const location = window.settings?.locations?.find(loc => loc.name === u.location);
+              return location?.parent === "contractor";
+            };
+          }
+          else if (key === 'publicCount') {
+            filterFn = u => {
+              const location = window.settings?.locations?.find(loc => loc.name === u.location);
+              return location?.parent === "public";
+            };
+          }
           inventory.filter(filterFn).forEach(u => {
             const m = u.model || 'Unknown';
             modelCounts[m] = (modelCounts[m] || 0) + 1;
           });
-        } else if (key === 'Overdue') {
-          const now = Date.now();
-          const threshold = 14 * 24 * 60 * 60 * 1000;
-          inventory.filter(i => i.assignedDate && (now - new Date(i.assignedDate).getTime()) > threshold)
-            .forEach(u => {
-              const m = u.model || 'Unknown';
-              modelCounts[m] = (modelCounts[m] || 0) + 1;
-            });
         }
         if (Object.keys(modelCounts).length === 0) {
           tooltip.innerHTML = "No data";
@@ -688,7 +691,7 @@ async function showChargerListForLocation(loc, inventory) {
         injectDashboardPage();
         const inventory = await loadInventory();
         const shipments = await loadShipments();
-        const stats = getDashboardStats(inventory, shipments);
+        const stats = await getDashboardStats(inventory, shipments);
         renderStatCards(stats, inventory);
         // ...other render calls...
         renderShipmentCountdown(stats.nextShipment);

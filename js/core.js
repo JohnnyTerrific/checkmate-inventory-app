@@ -613,10 +613,19 @@ if (globalSearchBtn && globalSearchDialog) {
 }
 
 window.openGlobalSearchDialog = function () {
+  // Ensure we have inventory data
+  if (!window.inventory || window.inventory.length === 0) {
+    showToast('Loading inventory data...', 'blue');
+    // Redirect to inventory page where data will be loaded
+    window.location.href = '/inventory.html';
+    return;
+  }
+  
   let globalSearchDialog = document.getElementById('globalSearchDialog');
   if (!globalSearchDialog) {
     globalSearchDialog = document.createElement('dialog');
     globalSearchDialog.id = 'globalSearchDialog';
+    globalSearchDialog.className = 'rounded-xl p-4';
     document.body.appendChild(globalSearchDialog);
   }
   globalSearchDialog.innerHTML = `
@@ -655,7 +664,7 @@ window.performGlobalSearch = function(query) {
   if (!resultsDiv) return;
 
   const shipments = JSON.parse(localStorage.getItem('cm_shipments_v1') || '[]');
-  const inventory = JSON.parse(localStorage.getItem('cm_inventory_v1') || '[]');
+  const inventory = window.inventory || [];
   const products = JSON.parse(localStorage.getItem('cm_products_v1') || '[]');
 
   // If no query, show nothing (or optionally recent items)
@@ -705,10 +714,12 @@ window.performGlobalSearch = function(query) {
         <div><b>ID:</b> ${i.chargerId}</div>
         <div><b>Serial:</b> ${i.chargerSerial || '-'}</div>
         <div><b>SIM:</b> ${i.simNumber || '-'}</div>
-        <div><b>Product:</b> ${i.product || '-'}</div>
-<div class="flex gap-2 mt-1">
+        <div><b>Product:</b> ${i.product || i.model || '-'}</div>
+        <div><b>Status:</b> ${i.status || '-'}</div>
+        <div><b>Location:</b> ${i.location || '-'}</div>
+        <div class="flex gap-2 mt-1">
   <button type="button" class="move-btn px-2 py-1 text-xs rounded bg-blue-600 text-white"
-    data-chargerid="${i.chargerId}" data-serial="${i.chargerSerial}">Move</button>
+    data-chargerid="${i.chargerId}" data-serial="${i.chargerSerial || ''}">Move</button>
   <button type="button" class="edit-inventory-btn px-2 py-1 text-xs rounded bg-green-600 text-white"
     data-chargerid="${i.chargerId}" data-serial="${i.chargerSerial}">Edit</button>
   <button type="button" class="view-inventory-btn px-2 py-1 text-xs rounded bg-purple-600 text-white"
@@ -724,7 +735,7 @@ resultsDiv.querySelectorAll('.move-btn').forEach(btn => {
   btn.onclick = function() {
     const chargerId = btn.dataset.chargerid;
     const chargerSerial = btn.dataset.serial;
-    const inventory = JSON.parse(localStorage.getItem('cm_inventory_v1') || '[]');
+    const inventory = window.inventory || [];
     const unit = inventory.find(i => i.chargerId === chargerId && i.chargerSerial === chargerSerial);
 
     if (unit) {
@@ -751,7 +762,7 @@ resultsDiv.querySelectorAll('.edit-inventory-btn').forEach(btn => {
   btn.onclick = function() {
     const chargerId = btn.dataset.chargerid;
     const chargerSerial = btn.dataset.serial;
-    const inventory = JSON.parse(localStorage.getItem('cm_inventory_v1') || '[]');
+    const inventory = window.inventory || [];
     const unit = inventory.find(i => i.chargerId === chargerId && i.chargerSerial === chargerSerial);
 
     if (unit) {
@@ -775,7 +786,7 @@ resultsDiv.querySelectorAll('.edit-inventory-btn').forEach(btn => {
 resultsDiv.querySelectorAll('.view-inventory-btn').forEach(btn => {
   btn.onclick = function() {
     const chargerId = btn.dataset.chargerid;
-    const inventory = JSON.parse(localStorage.getItem('cm_inventory_v1') || '[]');
+    const inventory = window.inventory || [];
     const unit = inventory.find(i => i.chargerId === chargerId);
 
     if (unit) {
