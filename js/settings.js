@@ -116,27 +116,40 @@ export function getParentContainerById(parentId, settings) {
 
 export async function getDashboardStats(inventory, shipments) {
   // Load settings first
-  const settings = loadSettings();
+  const settings = await loadSettings();
+  
+  // Create a combined locations array that includes contractors
+  const allLocations = [
+    ...settings.locations,
+    // Add contractors as locations with parent "contractor"
+    ...(settings.contractors || []).map(contractor => ({
+      name: contractor.name,
+      parent: "contractor"
+    }))
+  ];
   
   const byStatus = {};
   let contractorCount = 0, overdueCount = 0, publicCount = 0;
   let inStockCount = 0, installedCount = 0;
   
   inventory.forEach(i => {
-    // Count by status
-    byStatus[i.status] = (byStatus[i.status] || 0) + 1;
+    const status = i.status || 'Unknown';
+    const location = i.location || '';
     
-    // Find location's parent container
-    const location = settings.locations?.find(loc => loc.name === i.location);
-    const parentId = location?.parent || "other";
+    // Count by status for the donut chart
+    byStatus[status] = (byStatus[status] || 0) + 1;
     
-    // Count by parent container type
+    // Find location's parent container using the combined locations array
+    const locationObj = allLocations.find(loc => loc.name === location);
+    const parentId = locationObj?.parent || "other";
+    
+    // Count by PARENT CONTAINER TYPE
     if (parentId === "warehouse") {
-      inStockCount++;
+      inStockCount++; // Items at warehouse locations = "In Stock"
     } else if (parentId === "customer") {
-      installedCount++;
+      installedCount++; // Items at customer locations = "Installed"  
     } else if (parentId === "contractor") {
-      contractorCount++;
+      contractorCount++; // Items at contractor locations = "With Contractors"
       
       // Check if overdue (>14 days with contractor)
       const now = Date.now();
@@ -145,8 +158,20 @@ export async function getDashboardStats(inventory, shipments) {
         overdueCount++;
       }
     } else if (parentId === "public") {
-      publicCount++;
+      publicCount++; // Items at public locations = "Public Assets"
     }
+  });
+  
+  // Enhanced debug logging
+  console.log('Dashboard Stats Debug:', {
+    total: inventory.length,
+    inStockCount: `${inStockCount} (warehouse locations)`,
+    installedCount: `${installedCount} (customer locations)`, 
+    contractorCount: `${contractorCount} (contractor locations)`,
+    publicCount: `${publicCount} (public locations)`,
+    contractorNames: (settings.contractors || []).map(c => c.name),
+    allLocations: allLocations.map(loc => ({ name: loc.name, parent: loc.parent })),
+    byStatus
   });
   
   // Get next shipment date

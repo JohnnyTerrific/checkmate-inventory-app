@@ -365,80 +365,97 @@ function renderStatusPills(statusMap, onClickStatus) {
   }
 
   // ① Renders the KPI cards
-  function renderStatCards(stats, inventory) {
-    const cards = [
-      { label: 'Total Units', value: stats.total, key: 'total' },
-      { label: 'In Stock', value: stats.inStockCount || 0, key: 'inStockCount' },
-      { label: 'Installed', value: stats.installedCount || 0, key: 'installedCount' },
-      { label: 'With Contractors', value: stats.contractorCount || 0, key: 'contractorCount' },
-      { label: 'Overdue (>14d)', value: stats.overdueCount || 0, key: 'overdueCount' },
-      { label: 'Public Assets', value: stats.publicCount || 0, key: 'publicCount' }
-    ];
-    const container = document.getElementById('stat-cards');
-    container.innerHTML = cards.map((c, i) => `
-      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-3 flex flex-col animate-countup relative stat-card"
-           style="border-left: 6px solid ${rainbowColors[i % rainbowColors.length]};"
-           data-key="${c.key}">
-        <span class="text-xs font-medium text-gray-500 dark:text-gray-400">${c.label}</span>
-        <span class="text-xl font-bold text-gray-900 dark:text-gray-100">${c.value}</span>
-        <div class="stat-tooltip absolute z-10 left-1/2 -translate-x-1/2 mt-2 bg-gray-800 text-white text-xs rounded px-3 py-2 shadow-lg hidden whitespace-nowrap"></div>
-      </div>
-    `).join('');
+async function renderStatCards(stats, inventory) {
+  // Load settings for tooltip logic
+  const settings = await loadSettings();
   
-    // Tooltip handling
-    document.querySelectorAll('.stat-card').forEach(card => {
-      const key = card.dataset.key;
-      const tooltip = card.querySelector('.stat-tooltip');
-      card.addEventListener('mouseenter', e => {
-        let modelCounts = {};
-        if (key === 'total') {
-          // Count all models
-          inventory.forEach(u => {
-            const m = u.model || 'Unknown';
-            modelCounts[m] = (modelCounts[m] || 0) + 1;
-          });
-        } else if (
-          key === 'inStockCount' ||
-          key === 'installedCount' ||
-          key === 'contractorCount' ||
-          key === 'publicCount'
-        ) {
-          let filterFn;
-          if (key === 'inStockCount') filterFn = u => u.status === 'In Stock';
-          else if (key === 'installedCount') filterFn = u => u.status === 'Installed';
-          else if (key === 'contractorCount') {
-            // Use parent container logic for contractors
-            filterFn = u => {
-              // You may need to load settings here if not already available
-              const location = window.settings?.locations?.find(loc => loc.name === u.location);
-              return location?.parent === "contractor";
-            };
-          }
-          else if (key === 'publicCount') {
-            filterFn = u => {
-              const location = window.settings?.locations?.find(loc => loc.name === u.location);
-              return location?.parent === "public";
-            };
-          }
-          inventory.filter(filterFn).forEach(u => {
-            const m = u.model || 'Unknown';
-            modelCounts[m] = (modelCounts[m] || 0) + 1;
-          });
-        }
-        if (Object.keys(modelCounts).length === 0) {
-          tooltip.innerHTML = "No data";
-        } else {
-          tooltip.innerHTML = Object.entries(modelCounts).map(
-            ([model, qty]) => `<div>${model}: <b>${qty}</b></div>`
-          ).join('');
-        }
-        tooltip.classList.remove('hidden');
-      });
-      card.addEventListener('mouseleave', e => {
-        tooltip.classList.add('hidden');
-      });
+  const cards = [
+    { label: 'Total Units', value: stats.total, key: 'total' },
+    { label: 'In Stock', value: stats.inStockCount || 0, key: 'inStockCount' },
+    { label: 'Installed', value: stats.installedCount || 0, key: 'installedCount' },
+    { label: 'With Contractors', value: stats.contractorCount || 0, key: 'contractorCount' },
+    { label: 'Overdue (>14d)', value: stats.overdueCount || 0, key: 'overdueCount' },
+    { label: 'Public Assets', value: stats.publicCount || 0, key: 'publicCount' }
+  ];
+  const container = document.getElementById('stat-cards');
+  container.innerHTML = cards.map((c, i) => `
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-3 flex flex-col animate-countup relative stat-card"
+         style="border-left: 6px solid ${rainbowColors[i % rainbowColors.length]};"
+         data-key="${c.key}">
+      <span class="text-xs font-medium text-gray-500 dark:text-gray-400">${c.label}</span>
+      <span class="text-xl font-bold text-gray-900 dark:text-gray-100">${c.value}</span>
+      <div class="stat-tooltip absolute z-10 left-1/2 -translate-x-1/2 mt-2 bg-gray-800 text-white text-xs rounded px-3 py-2 shadow-lg hidden whitespace-nowrap"></div>
+    </div>
+  `).join('');
+
+  // Tooltip handling - FIXED TO USE PARENT CONTAINER LOGIC
+  document.querySelectorAll('.stat-card').forEach(card => {
+    const key = card.dataset.key;
+    const tooltip = card.querySelector('.stat-tooltip');
+    card.addEventListener('mouseenter', e => {
+      let modelCounts = {};
+      if (key === 'total') {
+        // Count all models
+        inventory.forEach(u => {
+          const m = u.model || 'Unknown';
+          modelCounts[m] = (modelCounts[m] || 0) + 1;
+        });
+      } else if (
+        key === 'inStockCount' ||
+        key === 'installedCount' ||
+        key === 'contractorCount' ||
+        key === 'publicCount'
+      ) {
+        let filterFn;
+        
+        // ✅ FIXED: Use parent container logic for ALL cards
+if (key === 'inStockCount') {
+  filterFn = u => {
+    const location = settings.locations?.find(loc => loc.name === u.location);
+    return location?.parent === "warehouse";
+  };
+} else if (key === 'installedCount') {
+  filterFn = u => {
+    const location = settings.locations?.find(loc => loc.name === u.location);
+    return location?.parent === "customer";
+  };
+} else if (key === 'contractorCount') {
+  filterFn = u => {
+    // Check both regular locations and contractor names
+    const location = settings.locations?.find(loc => loc.name === u.location);
+    if (location?.parent === "contractor") return true;
+    
+    // Also check if location matches a contractor name directly
+    const contractorNames = (settings.contractors || []).map(c => c.name);
+    return contractorNames.includes(u.location);
+  };
+} else if (key === 'publicCount') {
+  filterFn = u => {
+    const location = settings.locations?.find(loc => loc.name === u.location);
+    return location?.parent === "public";
+  };
+}
+        
+        inventory.filter(filterFn).forEach(u => {
+          const m = u.model || 'Unknown';
+          modelCounts[m] = (modelCounts[m] || 0) + 1;
+        });
+      }
+      
+      if (Object.keys(modelCounts).length === 0) {
+        tooltip.innerHTML = "No data";
+      } else {
+        tooltip.innerHTML = Object.entries(modelCounts).map(
+          ([model, qty]) => `<div>${model}: <b>${qty}</b></div>`
+        ).join('');
+      }
+      tooltip.classList.remove('hidden');
     });
-  }  
+    card.addEventListener('mouseleave', e => {
+      tooltip.classList.add('hidden');
+    });
+  });
+}
 
 // ② Starts the shipment countdown
 function renderShipmentCountdown(nextTs) {
@@ -692,7 +709,7 @@ async function showChargerListForLocation(loc, inventory) {
         const inventory = await loadInventory();
         const shipments = await loadShipments();
         const stats = await getDashboardStats(inventory, shipments);
-        renderStatCards(stats, inventory);
+        await renderStatCards(stats, inventory); // ✅ Add await here
         // ...other render calls...
         renderShipmentCountdown(stats.nextShipment);
         renderAgingAlerts(stats, inventory);

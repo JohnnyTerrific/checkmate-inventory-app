@@ -219,7 +219,7 @@ function getLocationColor(loc) {
     const settings = await loadSettings();
     const contractorLocations = (settings.contractors || []).map(c => ({
       name: c.name,
-      parent: "Contractor/Technician",
+      parent: "contractor", // Changed from "Contractor/Technician" to match the parent container ID
       isContractor: true,
       company: c.company,
       phone: c.phone,

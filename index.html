@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>CheckMate Inventory Management</title>
+  <title>CheckMate - Executive Dashboard</title>
   <link rel="shortcut icon" type="image/png" href="/img/logo-mini.png" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script>tailwind.config = { darkMode: 'class' }</script>
@@ -11,39 +11,56 @@
   <style> body { visibility: hidden; } </style>
 </head>
 <body data-page="home">
-  <!-- Shell will be injected here by core.js -->
-  <main id="main-content-area" class="p-4 md:p-6 lg:p-8"> <!-- Add a main content area for page specific content -->
-    <section id="index-main" class="max-w-7xl mx-auto py-4 space-y-6">
-      <!-- KPI Cards - larger, fuller width -->
-      <div id="kpi-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 px-2"></div>
-      
-      <!-- Charts section - increased height, less padding -->
-      <div class="grid md:grid-cols-2 gap-6 px-2">
-          <!-- Donut Chart - increased canvas size -->
-          <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-              <h3 class="text-xl font-bold mb-3 text-gray-700 dark:text-gray-200">Asset Distribution</h3>
-              <div class="flex justify-center items-center">
-                  <canvas id="assetDonut" width="360" height="340"></canvas>
-              </div>
-          </div>
-          
-          <!-- Milestone Progress - increased height -->
-          <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-              <h3 class="text-xl font-bold mb-3 text-gray-700 dark:text-gray-200">Supply Chain Status</h3>
-              <div id="milestone-progress" class="pt-2 h-[340px] flex flex-col justify-center"></div>
-          </div>
+  <main id="main-content-area" class="p-4 md:p-6 lg:p-8">
+    <section id="index-main" class="max-w-7xl mx-auto py-4 space-y-8">
+      <!-- Executive KPI Cards -->
+      <div>
+        <h2 class="text-2xl font-bold text-gray-800 dark:text-gray-200 mb-4">Executive Dashboard</h2>
+        <div id="kpi-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"></div>
       </div>
       
-      <!-- Depreciation Summary - more compact -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 px-2">
-          <h3 class="text-xl font-bold mb-3 text-gray-700 dark:text-gray-200">Asset Depreciation</h3>
-          <div id="depreciation-summary" class="py-4"></div>
+      <!-- Charts Section -->
+      <div class="grid lg:grid-cols-2 gap-8">
+        <!-- Asset Distribution Chart -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+          <h3 class="text-xl font-bold mb-4 text-gray-700 dark:text-gray-200">Asset Value Distribution</h3>
+          <div class="flex justify-center items-center">
+            <canvas id="assetDonut" width="400" height="350"></canvas>
+          </div>
+        </div>
+        
+        <!-- Deployment Pipeline -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+          <h3 class="text-xl font-bold mb-4 text-gray-700 dark:text-gray-200">Deployment Pipeline</h3>
+          <div id="milestone-progress" class="h-[350px] flex flex-col justify-center"></div>
+        </div>
+      </div>
+      
+      <!-- Financial Analysis -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+        <h3 class="text-xl font-bold mb-4 text-gray-700 dark:text-gray-200">Asset Depreciation Analysis</h3>
+        <div id="depreciation-summary"></div>
+      </div>
+      
+      <!-- Additional Metrics Row -->
+      <div class="grid md:grid-cols-2 gap-8">
+        <!-- Asset Health -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+          <h3 class="text-xl font-bold mb-4 text-gray-700 dark:text-gray-200">Asset Health Overview</h3>
+          <div id="asset-health"></div>
+        </div>
+        
+        <!-- Growth Trajectory -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+          <h3 class="text-xl font-bold mb-4 text-gray-700 dark:text-gray-200">Growth Trajectory</h3>
+          <div id="growth-trajectory"></div>
+        </div>
       </div>
     </section>
   </main>
   
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <!-- Chart.js for index page -->
-  <script type="module" src="/js/core.js"></script> <!-- For shell, common UI, and auth handling -->
-  <script type="module" src="/js/index.js"></script> <!-- Page-specific logic for index.html -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script type="module" src="/js/core.js"></script>
+  <script type="module" src="/js/index.js"></script>
 </body>
 </html>
