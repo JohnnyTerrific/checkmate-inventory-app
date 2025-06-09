@@ -464,15 +464,13 @@ dialog.querySelector('form').onsubmit = async e => {
   `;
   document.body.insertAdjacentHTML('beforeend', fabHTML);
 
-  setTimeout(() => {
-    const addItemBtn = document.getElementById("addItemBtn");
-    const bulkAddBtn = document.getElementById("bulkAddBtn");
-    const addShipmentBtn = document.getElementById("addShipmentBtn");
-    
-    if (addItemBtn) addItemBtn.onclick = showAddItemDialog;
-    if (bulkAddBtn) bulkAddBtn.onclick = window.openBulkAddDialog;
-    if (addShipmentBtn) addShipmentBtn.onclick = window.openCreateShipmentDialog;
-  }, 100);
+  const addItemBtn = document.getElementById("addItemBtn");
+  const bulkAddBtn = document.getElementById("bulkAddBtn");
+  const addShipmentBtn = document.getElementById("addShipmentBtn");
+  
+  if (addItemBtn) addItemBtn.onclick = showAddItemDialog;
+  if (bulkAddBtn) bulkAddBtn.onclick = window.openBulkAddDialog;
+  if (addShipmentBtn) addShipmentBtn.onclick = window.openCreateShipmentDialog;
 
   if (!document.getElementById('barcodeScanDialog')) {
     const scanDialog = document.createElement('dialog');
@@ -583,35 +581,56 @@ function renderInventoryTable(main) {
   // Attach download handlers immediately, not in setTimeout
   const csvBtn = main.querySelector('#downloadCSV');
   const excelBtn = main.querySelector('#downloadExcel');
+
+  console.log('Attaching download handlers:', { csvBtn, excelBtn }); // Debug log
   
   if (csvBtn) {
-    csvBtn.onclick = (e) => {
+    console.log('Attaching CSV handler');
+    csvBtn.onclick = (e) => {  // Use onclick, not addEventListener for simplicity
       e.preventDefault();
       e.stopPropagation();
-      console.log('CSV download clicked');
-      window.downloadInventoryCSV();
+      console.log('CSV download clicked - executing');
+      try {
+        window.downloadInventoryCSV();
+        console.log('CSV download completed');
+      } catch (error) {
+        console.error('CSV download error:', error);
+        showToast('CSV download failed: ' + error.message, 'red');
+      }
     };
+  } else {
+    console.error('CSV button not found!');
   }
 
   if (excelBtn) {
-    excelBtn.onclick = (e) => {
+    console.log('Attaching Excel handler');
+    excelBtn.onclick = (e) => {  // Use onclick, not addEventListener for simplicity
       e.preventDefault();
       e.stopPropagation();
-      console.log('Excel download clicked');
-      window.downloadInventoryExcel();
+      console.log('Excel download clicked - executing');
+      try {
+        window.downloadInventoryExcel();
+        console.log('Excel download completed');
+      } catch (error) {
+        console.error('Excel download error:', error);
+        showToast('Excel download failed: ' + error.message, 'red');
+      }
     };
+  } else {
+    console.error('Excel button not found!');
   }
 
-  injectInventoryFABs();
-  
-  // First render the table rows
-  renderTableRows();
-  
-  // Then initialize search after DOM is ready
-  setTimeout(() => {
-    initializeInventorySearch();
-  }, 50);
-}
+    // NOW inject FABs (this should not interfere with download buttons)
+    injectInventoryFABs();
+
+    // First render the table rows
+    renderTableRows();
+    
+    // Then initialize search after DOM is ready
+    setTimeout(() => {
+      initializeInventorySearch();
+    }, 50);
+  }
 
 window.addEventListener('resize', () => {
   const newMode = shouldUseMobileLayout() ? 'mobile' : 'desktop';
@@ -621,17 +640,6 @@ window.addEventListener('resize', () => {
     
     // Re-render the table
     renderInventoryTable(document.getElementById('main-content'));
-    
-    // Re-attach event handlers after a delay
-    setTimeout(() => {
-      const addItemBtn = document.getElementById("addItemBtn");
-      const bulkAddBtn = document.getElementById("bulkAddBtn");
-      const addShipmentBtn = document.getElementById("addShipmentBtn");
-      
-      if (addItemBtn) addItemBtn.onclick = showAddItemDialog;
-      if (bulkAddBtn) bulkAddBtn.onclick = window.openBulkAddDialog;
-      if (addShipmentBtn) addShipmentBtn.onclick = window.openCreateShipmentDialog;
-    }, 100);
   }
 });
 
@@ -926,6 +934,10 @@ if (selectAll) {
 
   function openMobileSearchDialog(unit) {
     const dialog = document.getElementById('actionDialog');
+    
+    // Store unit data globally for the dialog buttons
+    window._tempDialogUnit = unit;
+    
     dialog.innerHTML = `
       <div class="w-full max-w-sm mx-auto">
         <div class="text-xl font-bold mb-4 text-purple-700 dark:text-purple-300">Unit Found</div>
@@ -935,15 +947,42 @@ if (selectAll) {
           <div class="text-sm text-gray-400">${unit.model || unit.product || ""}${unit.chargerSerial ? " • " + unit.chargerSerial : ""}</div>
         </div>
         <div class="flex flex-col gap-2">
-          <button type="button" class="w-full bg-purple-600 text-white py-2 px-4 rounded" onclick='window.openDetailsDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")});document.getElementById("actionDialog").close()'>View Details</button>
-          <button type="button" class="w-full bg-blue-600 text-white py-2 px-4 rounded" onclick='window.openMoveDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")});document.getElementById("actionDialog").close()'>Move Unit</button>
-          <button type="button" class="w-full bg-green-600 text-white py-2 px-4 rounded" onclick='window.openEditDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")});document.getElementById("actionDialog").close()'>Edit Unit</button>
-          <button type="button" class="w-full bg-gray-300 dark:bg-gray-700 py-2 px-4 rounded" onclick="document.getElementById('actionDialog').close()">Close</button>
+          <button type="button" id="viewDetailsBtn" class="w-full bg-purple-600 text-white py-2 px-4 rounded">View Details</button>
+          <button type="button" id="moveUnitBtn" class="w-full bg-blue-600 text-white py-2 px-4 rounded">Move Unit</button>
+          <button type="button" id="editUnitBtn" class="w-full bg-green-600 text-white py-2 px-4 rounded">Edit Unit</button>
+          <button type="button" id="closeDialogBtn" class="w-full bg-gray-300 dark:bg-gray-700 py-2 px-4 rounded">Close</button>
         </div>
       </div>
     `;
-    dialog.showModal();
-  }
+    
+  // Attach handlers after DOM creation
+  dialog.querySelector('#viewDetailsBtn').onclick = () => {
+    dialog.close();
+    if (typeof window.openDetailsDialog === 'function') {
+      window.openDetailsDialog(window._tempDialogUnit);
+    }
+  };
+  
+  dialog.querySelector('#moveUnitBtn').onclick = () => {
+    dialog.close();
+    if (typeof window.openMoveDialog === 'function') {
+      window.openMoveDialog(window._tempDialogUnit);
+    }
+  };
+  
+  dialog.querySelector('#editUnitBtn').onclick = () => {
+    dialog.close();
+    if (typeof window.openEditDialog === 'function') {
+      window.openEditDialog(window._tempDialogUnit);
+    }
+  };
+  
+  dialog.querySelector('#closeDialogBtn').onclick = () => {
+    dialog.close();
+  };
+  
+  dialog.showModal();
+}
 
   function debounce(fn, delay) {
     let timer = null;
