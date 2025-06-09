@@ -507,51 +507,120 @@ dialog.querySelector('form').onsubmit = async e => {
 document.addEventListener('DOMContentLoaded', async () => {
   if (document.body.dataset.page === "inventory") {
     window.isInitialLoad = true;
+    
+    // 1. Load data first
     window.inventory = await loadInventory();
     
-    // Then inject FABs
+    // 2. Render UI components
     injectInventoryFABs();
     renderInventoryTable(document.getElementById('main-content'));
 
+    // 3. Force resize event for layout adjustments
     window.dispatchEvent(new Event('resize'));
 
+    // 4. Initialize all event handlers and listeners in proper sequence
     setTimeout(() => {
+      // Attach download handlers explicitly AFTER DOM is stable
+      attachDownloadHandlers();
+      
+      // Initialize search functionality
       initializeInventorySearch();
+      
+      // Attach hover legends
+      attachHoverLegends();
+      
+      // Handle pending actions
+      handlePendingActions();
+      
+      // Mark initial load complete and start real-time updates
       window.isInitialLoad = false;
       listenToInventoryUpdates();
-    }, 200);
-  
-    
-    // Event handlers are already set in injectInventoryFABs(), but add hover legends
-    setTimeout(() => {
-      const addItemBtn = document.getElementById("addItemBtn");
-      const bulkAddBtn = document.getElementById("bulkAddBtn");
-      const addShipmentBtn = document.getElementById("addShipmentBtn");
-      
-      attachHoverLegend(addItemBtn, "Add single charger");
-      attachHoverLegend(bulkAddBtn, "Bulk add chargers");
-      attachHoverLegend(addShipmentBtn, "Create shipment");
-    }, 100);
-
-    // Handle pending actions...
-    const pendingAction = sessionStorage.getItem('pendingInventoryAction');
-    if (pendingAction) {
-      const { action, unit } = JSON.parse(pendingAction);
-      sessionStorage.removeItem('pendingInventoryAction');
-      setTimeout(() => {
-        if (action === 'move' && typeof window.openMoveDialog === "function") {
-          window.openMoveDialog(unit);
-        }
-        if (action === 'edit' && typeof window.openEditDialog === "function") {
-          window.openEditDialog(unit);
-        }
-        if (action === 'view' && typeof window.openDetailsDialog === "function") {
-          window.openDetailsDialog(unit);
-        }
-      }, 500);
-    }
+    }, 150); // Slightly reduced timeout but still safe
   }
 });
+
+// Add this new function to handle download button attachment
+function attachDownloadHandlers() {
+  const main = document.getElementById('main-content');
+  if (!main) {
+    console.log('Main content not found for download handlers');
+    return;
+  }
+  
+  const csvBtn = main.querySelector('#downloadCSV');
+  const excelBtn = main.querySelector('#downloadExcel');
+
+  if (csvBtn && !csvBtn.onclick) { // Prevent double-binding
+    csvBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('CSV download triggered');
+      try {
+        if (typeof window.downloadInventoryCSV === 'function') {
+          window.downloadInventoryCSV();
+        } else {
+          console.error('downloadInventoryCSV function not found');
+          showToast('CSV download function not available', 'red');
+        }
+      } catch (error) {
+        console.error('CSV download error:', error);
+        showToast('CSV download failed: ' + error.message, 'red');
+      }
+    };
+    console.log('CSV download handler attached');
+  }
+
+  if (excelBtn && !excelBtn.onclick) { // Prevent double-binding
+    excelBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('Excel download triggered');
+      try {
+        if (typeof window.downloadInventoryExcel === 'function') {
+          window.downloadInventoryExcel();
+        } else {
+          console.error('downloadInventoryExcel function not found');
+          showToast('Excel download function not available', 'red');
+        }
+      } catch (error) {
+        console.error('Excel download error:', error);
+        showToast('Excel download failed: ' + error.message, 'red');
+      }
+    };
+    console.log('Excel download handler attached');
+  }
+}
+
+// Add this new function to handle hover legends
+function attachHoverLegends() {
+  const addItemBtn = document.getElementById("addItemBtn");
+  const bulkAddBtn = document.getElementById("bulkAddBtn");
+  const addShipmentBtn = document.getElementById("addShipmentBtn");
+  
+  attachHoverLegend(addItemBtn, "Add single charger");
+  attachHoverLegend(bulkAddBtn, "Bulk add chargers");
+  attachHoverLegend(addShipmentBtn, "Create shipment");
+}
+
+// Add this new function to handle pending actions
+function handlePendingActions() {
+  const pendingAction = sessionStorage.getItem('pendingInventoryAction');
+  if (pendingAction) {
+    const { action, unit } = JSON.parse(pendingAction);
+    sessionStorage.removeItem('pendingInventoryAction');
+    setTimeout(() => {
+      if (action === 'move' && typeof window.openMoveDialog === "function") {
+        window.openMoveDialog(unit);
+      }
+      if (action === 'edit' && typeof window.openEditDialog === "function") {
+        window.openEditDialog(unit);
+      }
+      if (action === 'view' && typeof window.openDetailsDialog === "function") {
+        window.openDetailsDialog(unit);
+      }
+    }, 300);
+  }
+}
   
 async function getStatusesForLocation(location) {
   const settings = await loadSettings();
@@ -620,51 +689,6 @@ function renderInventoryTable(main) {
     <div id="paginationBar"></div>
   `;
 
-  // Attach download handlers immediately, not in setTimeout
-  const csvBtn = main.querySelector('#downloadCSV');
-  const excelBtn = main.querySelector('#downloadExcel');
-
-  console.log('Attaching download handlers:', { csvBtn, excelBtn }); // Debug log
-  
-  if (csvBtn) {
-    console.log('Attaching CSV handler');
-    csvBtn.onclick = (e) => {  // Use onclick, not addEventListener for simplicity
-      e.preventDefault();
-      e.stopPropagation();
-      console.log('CSV download clicked - executing');
-      try {
-        window.downloadInventoryCSV();
-        console.log('CSV download completed');
-      } catch (error) {
-        console.error('CSV download error:', error);
-        showToast('CSV download failed: ' + error.message, 'red');
-      }
-    };
-  } else {
-    console.error('CSV button not found!');
-  }
-
-  if (excelBtn) {
-    console.log('Attaching Excel handler');
-    excelBtn.onclick = (e) => {  // Use onclick, not addEventListener for simplicity
-      e.preventDefault();
-      e.stopPropagation();
-      console.log('Excel download clicked - executing');
-      try {
-        window.downloadInventoryExcel();
-        console.log('Excel download completed');
-      } catch (error) {
-        console.error('Excel download error:', error);
-        showToast('Excel download failed: ' + error.message, 'red');
-      }
-    };
-  } else {
-    console.error('Excel button not found!');
-  }
-
-    // NOW inject FABs (this should not interfere with download buttons)
-    injectInventoryFABs();
-
     // First render the table rows
     renderTableRows();
     
@@ -674,16 +698,21 @@ function renderInventoryTable(main) {
     }, 50);
   }
 
-window.addEventListener('resize', () => {
-  const newMode = shouldUseMobileLayout() ? 'mobile' : 'desktop';
-  if (newMode !== currentLayoutMode) {
-    currentLayoutMode = newMode;
-    injectInventoryFABs();
-    
-    // Re-render the table
-    renderInventoryTable(document.getElementById('main-content'));
-  }
-});
+  window.addEventListener('resize', () => {
+    const newMode = shouldUseMobileLayout() ? 'mobile' : 'desktop';
+    if (newMode !== currentLayoutMode) {
+      currentLayoutMode = newMode;
+      injectInventoryFABs();
+      
+      // Re-render the table
+      renderInventoryTable(document.getElementById('main-content'));
+      
+      // Re-attach download handlers after re-render
+      setTimeout(() => {
+        attachDownloadHandlers();
+      }, 100);
+    }
+  });
 
   // Add this function after the renderInventoryTable function
   function initializeInventorySearch() {
@@ -2564,29 +2593,43 @@ window.openGlobalSearchDialog = openGlobalSearchDialog;
 window.openMobileSearchDialog = openMobileSearchDialog;
 window.openAssignContractorDialog = openAssignContractorDialog;
 window.downloadInventoryCSV = function() {
-  const items = [...window.inventory];
-  const header = ["Charger ID", "Serial", "Status", "Location", "Last Action"];
-  const rows = items.map(i => [i.chargerId, i.chargerSerial || '', i.status, i.location, i.lastAction]);
-  let csv = header.join(",") + "\n" + rows.map(r => r.join(",")).join("\n");
-  let blob = new Blob([csv], {type: "text/csv"});
-  let url = URL.createObjectURL(blob);
-  let a = document.createElement("a");
-  a.href = url;
-  a.download = "inventory.csv";
-  a.click();
-  URL.revokeObjectURL(url);
+  console.log('downloadInventoryCSV called');
+  try {
+    const items = [...window.inventory];
+    const header = ["Charger ID", "Serial", "Status", "Location", "Last Action"];
+    const rows = items.map(i => [i.chargerId, i.chargerSerial || '', i.status, i.location, i.lastAction]);
+    let csv = header.join(",") + "\n" + rows.map(r => r.join(",")).join("\n");
+    let blob = new Blob([csv], {type: "text/csv"});
+    let url = URL.createObjectURL(blob);
+    let a = document.createElement("a");
+    a.href = url;
+    a.download = "inventory.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('CSV downloaded successfully', 'green');
+  } catch (error) {
+    console.error('CSV download error:', error);
+    showToast('CSV download failed: ' + error.message, 'red');
+  }
 };
 
 window.downloadInventoryExcel = function() {
-  if (typeof XLSX === 'undefined') {
-    showToast('Excel library not loaded', 'red');
-    return;
+  console.log('downloadInventoryExcel called');
+  try {
+    if (typeof XLSX === 'undefined') {
+      showToast('Excel library not loaded', 'red');
+      return;
+    }
+    const items = [...window.inventory];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(items);
+    XLSX.utils.book_append_sheet(wb, ws, "Inventory");
+    XLSX.writeFile(wb, "inventory.xlsx");
+    showToast('Excel downloaded successfully', 'green');
+  } catch (error) {
+    console.error('Excel download error:', error);
+    showToast('Excel download failed: ' + error.message, 'red');
   }
-  const items = [...window.inventory];
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(items);
-  XLSX.utils.book_append_sheet(wb, ws, "Inventory");
-  XLSX.writeFile(wb, "inventory.xlsx");
 };
   
 
