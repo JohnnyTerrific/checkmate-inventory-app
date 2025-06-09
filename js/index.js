@@ -201,50 +201,68 @@ async function calculateBusinessMetrics(inventory, products, settings, auditLog)
     });
     
     if (parentId === "customer" || parentId === "public" || 
-        unit.status?.includes("Installed")) {
-      // Revenue-generating assets
-      metrics.financial.revenueAssets.count++;
-      metrics.financial.revenueAssets.value += value;
-      metrics.pipeline.deployed.push(unit);
-      
-      console.log('Added to revenue assets:', unit.chargerId);
-      
-    } else if (parentId === "warehouse") {
-      // Idle inventory - cash tied up
-      metrics.financial.idleInventory.count++;
-      metrics.financial.idleInventory.value += value;
-      metrics.pipeline.warehouse.push(unit);
-      
-      console.log('Added to idle inventory:', unit.chargerId);
-      
-    } else if (parentId === "contractor") {
-      // In transit - being deployed
-      metrics.financial.inTransit.count++;
-      metrics.financial.inTransit.value += value;
-      metrics.pipeline.contractor.push(unit);
-      
-      console.log('Added to in transit:', unit.chargerId);
-      
-    } else {
-      metrics.pipeline.unknown.push(unit);
-      console.log('Added to unknown:', unit.chargerId, 'parentId:', parentId);
-    }  
+      unit.status?.includes("Installed")) {
+    // Revenue-generating assets
+    metrics.financial.revenueAssets.count++;
+    metrics.financial.revenueAssets.value += value;
+    metrics.pipeline.deployed.push(unit);
     
-    // Asset health tracking
-    if (unit.status === "Faulty") {
-      metrics.health.faulty++;
-      metrics.strategic.assetHealth.faulty++;
-    } else if (unit.status === "RMA") {
-      metrics.health.rma++;
-      metrics.strategic.assetHealth.maintenance++;
-    } else if (unit.status?.includes("In Stock") || unit.status?.includes("Installed")) {
-      metrics.health.operational++;
-      metrics.strategic.assetHealth.healthy++;
-    } else {
-      metrics.health.maintenance++;
-      metrics.strategic.assetHealth.maintenance++;
-    }
-  });
+    // ADD DEPRECIATION CALCULATION HERE
+    const deployedDate = new Date(unit.lastAction || unit.created || Date.now());
+    const monthsDeployed = Math.max(0, (Date.now() - deployedDate.getTime()) / (1000 * 60 * 60 * 24 * 30));
+    const depreciationRate = (product?.depreciationRate || 10) / 100; // Annual rate
+    const annualDepreciation = value * depreciationRate;
+    const totalDepreciation = Math.min(value * 0.9, (annualDepreciation * monthsDeployed / 12)); // Cap at 90%
+    const currentValue = Math.max(value * 0.1, value - totalDepreciation); // Floor at 10%
+    
+    metrics.depreciation.totalOriginal += value;
+    metrics.depreciation.totalCurrent += currentValue;
+    metrics.depreciation.assets.push({
+      chargerId: unit.chargerId,
+      originalValue: value,
+      currentValue: currentValue,
+      depreciation: totalDepreciation,
+      monthsDeployed: Math.round(monthsDeployed)
+    });
+    
+    console.log('Added to revenue assets:', unit.chargerId);
+    
+  } else if (parentId === "warehouse") {
+    // Idle inventory - cash tied up
+    metrics.financial.idleInventory.count++;
+    metrics.financial.idleInventory.value += value;
+    metrics.pipeline.warehouse.push(unit);
+    
+    console.log('Added to idle inventory:', unit.chargerId);
+    
+  } else if (parentId === "contractor") {
+    // In transit - being deployed
+    metrics.financial.inTransit.count++;
+    metrics.financial.inTransit.value += value;
+    metrics.pipeline.contractor.push(unit);
+    
+    console.log('Added to in transit:', unit.chargerId);
+    
+  } else {
+    metrics.pipeline.unknown.push(unit);
+    console.log('Added to unknown:', unit.chargerId, 'parentId:', parentId);
+  }  
+  
+  // Asset health tracking
+  if (unit.status === "Faulty") {
+    metrics.health.faulty++;
+    metrics.strategic.assetHealth.faulty++;
+  } else if (unit.status === "RMA") {
+    metrics.health.rma++;
+    metrics.strategic.assetHealth.maintenance++;
+  } else if (unit.status?.includes("In Stock") || unit.status?.includes("Installed")) {
+    metrics.health.operational++;
+    metrics.strategic.assetHealth.healthy++;
+  } else {
+    metrics.health.maintenance++;
+    metrics.strategic.assetHealth.maintenance++;
+  }
+});
 
   // Calculate financial metrics
   metrics.financial.totalAssetValue = metrics.financial.revenueAssets.value + 
@@ -527,6 +545,17 @@ function renderDepreciationAnalysis(depreciation) {
   const container = document.getElementById('depreciation-summary');
   if (!container) return;
   
+  // Handle case where no depreciation data exists
+  if (!depreciation.assets || depreciation.assets.length === 0) {
+    container.innerHTML = `
+      <div class="text-center py-8">
+        <div class="text-gray-500 text-lg">No deployed assets for depreciation analysis</div>
+        <div class="text-sm text-gray-400 mt-2">Assets will appear here once deployed to customers or public locations</div>
+      </div>
+    `;
+    return;
+  }
+  
   const depreciationRate = depreciation.totalOriginal > 0 ? 
     (depreciation.totalDepreciation / depreciation.totalOriginal * 100) : 0;
   
@@ -590,12 +619,12 @@ function renderGrowthTrajectory(growth) {
   const trendColor = growth.growthRate > 0 ? "text-green-600" : growth.growthRate < 0 ? "text-red-600" : "text-gray-600";
   
   container.innerHTML = `
-    <div class="flex items-center justify-between">
-      <div>
-        <div class="text-4xl">${trendIcon}</div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+      <div class="text-center">
+        <div class="text-4xl mb-2">${trendIcon}</div>
         <div class="text-sm text-gray-500">Growth Trend</div>
       </div>
-      <div class="text-right">
+      <div class="text-center">
         <div class="text-2xl font-bold ${trendColor}">
           ${growth.growthRate > 0 ? '+' : ''}${growth.growthRate.toFixed(1)}%
         </div>
@@ -610,6 +639,20 @@ function renderGrowthTrajectory(growth) {
         <div class="text-sm text-gray-500">Last Month</div>
       </div>
     </div>
+    ${growth.trend && growth.trend.length > 0 ? `
+    <div class="mt-4">
+      <div class="text-sm font-medium text-gray-600 mb-2">6-Month Trend:</div>
+      <div class="flex justify-between items-end h-16 bg-gray-50 rounded p-2">
+        ${growth.trend.map(month => `
+          <div class="flex flex-col items-center">
+            <div class="bg-purple-600 rounded-t" style="height: ${Math.max(4, (month.deployments / Math.max(...growth.trend.map(m => m.deployments), 1)) * 48)}px; width: 12px;"></div>
+            <div class="text-xs mt-1">${month.month}</div>
+            <div class="text-xs text-gray-500">${month.deployments}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    ` : ''}
   `;
 }
 
