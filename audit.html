@@ -1,49 +1,44 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>CheckMate Audit Logs</title>
-        <link rel="shortcut icon" type="image/png" href="/img/logo-mini.png">
-        <!-- Tailwind CDN -->
-        <script src="https://cdn.tailwindcss.com"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-        <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-        <script>
-          tailwind.config = { darkMode: 'class' }
-        </script>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <link rel="stylesheet" href="/assets/css/style.css" />
-        <style>
-          body { visibility: hidden; }
-        </style>
-      </head>
+<head>
+    <meta charset="UTF-8">
+    <title>CheckMate Audit Logs</title>
+    <link rel="shortcut icon" type="image/png" href="/img/logo-mini.png">
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script>
+      tailwind.config = { darkMode: 'class' }
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="/assets/css/style.css" />
+    <style>
+      body { visibility: hidden; }
+    </style>
+</head>
 <body data-page="audit">
-  <section id="audit-content" class="p-4 max-w-5xl mx-auto">
-    <div id="auditTableContainer"></div>
-  </section>
-  <dialog id="actionDialog"></dialog>
+  <!-- Main content will be injected by shell -->
+  
+  <!-- Firebase SDK + initialize MUST come before any module -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMjlJ5Uo",
+      authDomain: "checkmate-enova.firebaseapp.com",
+      projectId: "checkmate-enova",
+      storageBucket: "checkmate-enova.appspot.com",
+      messagingSenderId: "103678023284",
+      appId: "1:103678023284:web:689229ef07859db22e77e1"
+    };
+    firebase.initializeApp(firebaseConfig);
+    window.db   = firebase.firestore();
+    window.auth = firebase.auth();
+  </script>
 
-     <!-- ── FIREBASE SDK + initialize MUST come before any module -->
-   <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-app-compat.js"></script>
-   <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-auth-compat.js"></script>
-   <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore-compat.js"></script>
-   <script>
-     const firebaseConfig = {
-       apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMjlJ5Uo",
-       authDomain: "checkmate-enova.firebaseapp.com",
-       projectId: "checkmate-enova",
-       storageBucket: "checkmate-enova.appspot.com",
-       messagingSenderId: "103678023284",
-       appId: "1:103678023284:web:689229ef07859db22e77e1"
-     };
-     firebase.initializeApp(firebaseConfig);
-     window.db   = firebase.firestore();
-     window.auth = firebase.auth();
-   </script>
-
-   <!-- 3) Only after Firebase init, load modules -->
-   <script type="module" src="/js/core.js"></script>
-   <script type="module" src="/js/audit.js"></script>
-   <script type="module" src="/js/inventory.js"></script>
+  <!-- Load modules -->
+  <script type="module" src="/js/core.js"></script>
+  <script type="module" src="/js/audit.js"></script>
 </body>
 </html>

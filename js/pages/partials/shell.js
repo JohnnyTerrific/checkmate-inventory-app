@@ -194,7 +194,6 @@ export const shellHTML = `
   </svg>
   <span class="hidden sm:inline">Logout</span>
 </button>
-</button>
   </div>
 </header>
 

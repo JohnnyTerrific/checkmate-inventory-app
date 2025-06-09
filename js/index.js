@@ -4,6 +4,9 @@ import { loadProducts } from './products.js';
 import { loadInventory } from './inventory.js';
 import { loadSettings } from './settings.js';
 import { loadAuditLog } from './inventory.js';
+import { getCurrentUserRole } from './utils/users.js';
+import { can } from './utils/permissions.js';
+
 
 function checkMobileAndRedirect() {
   const isMobile = window.innerWidth < 768; // Mobile breakpoint

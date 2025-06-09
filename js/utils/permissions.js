@@ -10,7 +10,9 @@ export const ROLE_PERMISSIONS = {
         viewDashboard: true,
         viewIndex: true,
         productsCrud: true,
-        settings: true
+        settings: true,
+        viewAuditLog: true,
+        exportAuditLog: true
     },
     CEO: {
         canAddUsers: false,
@@ -20,9 +22,11 @@ export const ROLE_PERMISSIONS = {
         viewDashboard: true,
         viewIndex: true,
         productsCrud: false,
-        settings: true
+        settings: true,
+        viewAuditLog: true,
+        exportAuditLog: true
     },
-    COO: { // Optional if COO same as CEO
+    COO: {
         canAddUsers: false,
         manageLocations: false,
         manageContractors: true,
@@ -30,7 +34,9 @@ export const ROLE_PERMISSIONS = {
         viewDashboard: true,
         viewIndex: true,
         productsCrud: false,
-        settings: true
+        settings: true,
+        viewAuditLog: true,
+        exportAuditLog: false
     },
     Agent: {
         canAddUsers: false,
@@ -40,15 +46,18 @@ export const ROLE_PERMISSIONS = {
         viewDashboard: false,
         viewIndex: false,
         productsCrud: false,
-        settings: false
+        settings: false,
+        viewAuditLog: true, // Can view their own entries only
+        exportAuditLog: false
     }
 };
 
-// Utility
+// Utility functions
 export function getPermissions(role) {
     return ROLE_PERMISSIONS[role] || {};
 }
+
 export async function can(permission) {
     const role = await getCurrentUserRole();
     return !!getPermissions(role)[permission];
-  }
+}

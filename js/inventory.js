@@ -2,7 +2,8 @@
 
 import { showToast } from './core.js';
 import { allowedStatusesByParent, getAllowedStatusesForLocation, loadSettings } from './settings.js';
-import { getCurrentUser, getCurrentUserEmail } from './utils/users.js';
+import { getCurrentUserRole, getCurrentUserEmail } from './utils/users.js';
+import { can, getPermissions } from './utils/permissions.js';
 import Quagga from 'quagga';
 import * as XLSX from 'xlsx';
 import { db } from './utils/firebase.js';
@@ -16,11 +17,18 @@ function shouldUseMobileLayout() {
   return window.innerWidth < 900 || ('ontouchstart' in window);
 }
 
-function isAdmin() {
-  // Replace with your actual admin email(s) or UID(s)
-  const adminEmails = ["johnny.n@enova-energy.co.il"];
-  return adminEmails.includes(getCurrentUserEmail());
-} 
+async function isAdmin() {
+  return await can('inventoryCrud') && await can('settings');
+}
+
+async function canManageInventory() {
+  return await can('inventoryCrud');
+}
+
+async function canDeleteItems() {
+  const role = await getCurrentUserRole();
+  return role === 'SuperAdmin'; // Only SuperAdmin can delete
+}
 
 // 1) Load entire inventory from Firestore
 export async function loadInventory() {
@@ -271,10 +279,16 @@ let cachedLocations = null;
 
 
 window.openBulkAddDialog = async function() {
+  if (!(await canManageInventory())) {
+    showToast("You don't have permission to manage inventory", "red");
+    return;
+  }
   const settings = await loadSettings();
   const dialog = document.getElementById('actionDialog');
+  const userRole = await getCurrentUserRole();
+
   dialog.innerHTML = `
-    <form method="dialog" class="flex flex-col gap-3 w-full sm:w-[32rem] max-w-2xl">
+        <form method="dialog" class="flex flex-col gap-3 w-full sm:w-[32rem] max-w-2xl">
       <h3 class="font-bold mb-2">Bulk Add Units</h3>
       <div class="text-sm text-gray-600 mb-2">
         Paste columns: <b>Model</b>, <b>Charger ID, Serial, SIM Number</b> (one per line)<br>
@@ -287,7 +301,15 @@ window.openBulkAddDialog = async function() {
       </label>
       <label>Default Status:
         <select id="bulkStatus" class="border px-2 py-1 rounded w-full">
-        ${(settings.statuses || []).map(s => `<option value="${s}" ${s === 'In Stock' ? 'selected' : ''}>${s}</option>`).join("")}
+        ${(settings.statuses || [])
+          .filter(s => {
+            // Filter out restricted statuses for non-admins
+            if (userRole === 'Agent') {
+              return !['Decommissioned', 'Lost'].includes(s);
+            }
+            return true;
+          })
+          .map(s => `<option value="${s}" ${s === 'In Stock' ? 'selected' : ''}>${s}</option>`).join("")}
         </select>
       </label>
       <textarea id="bulkText" rows="7" class="border px-2 py-1 rounded w-full" placeholder="Paste here"></textarea>
@@ -350,11 +372,11 @@ dialog.querySelector('form').onsubmit = async e => {
   }; 
 
   window.bulkDelete = async function() {
-    if (!isAdmin()) return;
-    if (!window.selectedUnits || !window.selectedUnits.length) {
-      showToast("No units selected", "red");
+    if (!(await canDeleteItems())) {
+      showToast("You don't have permission to delete items", "red");
       return;
     }
+
     if (!confirm(`Are you sure you want to delete ${window.selectedUnits.length} unit(s)?`)) return;
   
     // Use batch delete
@@ -414,9 +436,10 @@ dialog.querySelector('form').onsubmit = async e => {
     }
   };
 
-  function injectInventoryFABs() {
+  async function injectInventoryFABs() {
+    const canManage = await canManageInventory();
     // Remove FABs if on mobile
-    if (window.innerWidth < 640) {
+    if (window.innerWidth < 640 || !canManage) {
       ['addItemBtn', 'bulkAddBtn', 'addShipmentBtn'].forEach(id => {
         const btn = document.getElementById(id);
         if (btn) btn.remove();
@@ -468,7 +491,7 @@ dialog.querySelector('form').onsubmit = async e => {
   const bulkAddBtn = document.getElementById("bulkAddBtn");
   const addShipmentBtn = document.getElementById("addShipmentBtn");
   
-  if (addItemBtn) addItemBtn.onclick = showAddItemDialog;
+  if (addItemBtn) addItemBtn.onclick = () => showAddItemDialog(); // Add arrow function
   if (bulkAddBtn) bulkAddBtn.onclick = window.openBulkAddDialog;
   if (addShipmentBtn) addShipmentBtn.onclick = window.openCreateShipmentDialog;
 
@@ -530,10 +553,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
   
-async function getStatusesForLocation(loc) {
+async function getStatusesForLocation(location) {
   const settings = await loadSettings();
-  return getAllowedStatusesForLocation(loc, settings);
+  const userRole = await getCurrentUserRole();
+  
+  // Get allowed statuses for this location
+  let allowedStatuses = getAllowedStatusesForLocation(location, settings);
+  
+  // If no location-specific restrictions, use all statuses
+  if (!allowedStatuses || allowedStatuses.length === 0) {
+    allowedStatuses = settings.statuses || [];
+  }
+  
+  // Further restrict based on user role if needed
+  if (userRole === 'Agent') {
+    // Agents might not be able to set certain statuses
+    allowedStatuses = allowedStatuses.filter(status => 
+      !['Decommissioned', 'Lost'].includes(status)
+    );
+  }
+  
+  return allowedStatuses;
 }
+
 
 
 function renderInventoryTable(main) {
@@ -678,9 +720,11 @@ window.addEventListener('resize', () => {
   }
   
 
-  function renderTableRows() {
-    const main = document.getElementById('main-content');
-if (!main) return;
+// Fix the renderTableRows function to properly handle async permissions
+async function renderTableRows() {
+const main = document.getElementById('main-content');
+if (!main) return; 
+const canDelete = await canDeleteItems();
 const searchInput = main.querySelector('#searchInput');
 const filterStatus = main.querySelector('#filterStatus');
 const filterLocation = main.querySelector('#filterLocation');
@@ -711,7 +755,7 @@ const location = filterLocation.value;
     window.selectedUnits = window.selectedUnits.filter(id => window.inventory.some(i => i.chargerId === id));
     // Render table rows
     tbody.innerHTML = paginated.map((unit, idx) => `
-      <tr class="inv-row${window.selectedUnits.includes(unit.chargerId) ? ' selected' : ''}" data-idx="${idx}" data-id="${unit.chargerId}">
+    <tr class="inv-row${window.selectedUnits.includes(unit.chargerId) ? ' selected' : ''}" data-idx="${idx}" data-id="${unit.chargerId}">
         <td class="p-2 border-b text-center">
           <input type="checkbox" data-chargerid="${unit.chargerId}" ${window.selectedUnits.includes(unit.chargerId) ? "checked" : ""}>
         </td>
@@ -747,19 +791,19 @@ const location = filterLocation.value;
         </td>
         <td class="p-2 border-b table-cell">${new Date(unit.lastAction).toLocaleString()}</td>
         <td class="p-2 border-b table-cell">
-          <div class="table-dot-menu" data-idx="${idx}">
-            <button class="px-2 py-1 text-lg font-bold" onclick="event.stopPropagation();toggleRowMenu(${idx})">⋮</button>
-            <div class="table-dot-menu-content" id="row-menu-${idx}">
-              <button onclick='openDetailsDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})'>Details</button>
-              <button onclick='openMoveDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})'>Move</button>
-              <button onclick='openStatusDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})'>Change Status</button>
-              <button onclick='openEditDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})'>Edit</button>
-              ${isAdmin() ? `<button class="delete" onclick='deleteUnit("${unit.chargerId}")'>Delete</button>` : ""}
-            </div>
+        <div class="table-dot-menu" data-idx="${idx}">
+          <button class="px-2 py-1 text-lg font-bold" onclick="event.stopPropagation();toggleRowMenu(${idx})">⋮</button>
+          <div class="table-dot-menu-content" id="row-menu-${idx}">
+            <button onclick='openDetailsDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})'>Details</button>
+            <button onclick='openMoveDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})'>Move</button>
+            <button onclick='openStatusDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})'>Change Status</button>
+            <button onclick='openEditDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})'>Edit</button>
+            ${canDelete ? `<button class="delete" onclick='deleteUnit("${unit.chargerId}")'>Delete</button>` : ""}
           </div>
-        </td>
-      </tr>
-    `).join("");
+        </div>
+      </td>
+    </tr>
+  `).join("");
   
     // Menu logic
     tbody.querySelectorAll('.table-dot-menu > button').forEach((btn, idx) => {
@@ -947,19 +991,19 @@ if (selectAll) {
           <div class="text-sm text-gray-400">${unit.model || unit.product || ""}${unit.chargerSerial ? " • " + unit.chargerSerial : ""}</div>
         </div>
         <div class="flex flex-col gap-2">
-          <button type="button" id="viewDetailsBtn" class="w-full bg-purple-600 text-white py-2 px-4 rounded">View Details</button>
+          <button type="button" id="editUnitBtn" class="w-full bg-purple-600 text-white py-2 px-4 rounded">Edit Unit</button>
           <button type="button" id="moveUnitBtn" class="w-full bg-blue-600 text-white py-2 px-4 rounded">Move Unit</button>
-          <button type="button" id="editUnitBtn" class="w-full bg-green-600 text-white py-2 px-4 rounded">Edit Unit</button>
+          <button type="button" id="viewDetailsBtn" class="w-full bg-green-600 text-white py-2 px-4 rounded">View Details</button>
           <button type="button" id="closeDialogBtn" class="w-full bg-gray-300 dark:bg-gray-700 py-2 px-4 rounded">Close</button>
         </div>
       </div>
     `;
     
   // Attach handlers after DOM creation
-  dialog.querySelector('#viewDetailsBtn').onclick = () => {
+  dialog.querySelector('#editUnitBtn').onclick = () => {
     dialog.close();
-    if (typeof window.openDetailsDialog === 'function') {
-      window.openDetailsDialog(window._tempDialogUnit);
+    if (typeof window.openEditDialog === 'function') {
+      window.openEditDialog(window._tempDialogUnit);
     }
   };
   
@@ -970,10 +1014,10 @@ if (selectAll) {
     }
   };
   
-  dialog.querySelector('#editUnitBtn').onclick = () => {
+  dialog.querySelector('#viewDetailsBtn').onclick = () => {
     dialog.close();
-    if (typeof window.openEditDialog === 'function') {
-      window.openEditDialog(window._tempDialogUnit);
+    if (typeof window.openDetailsDialog === 'function') {
+      window.openDetailsDialog(window._tempDialogUnit);
     }
   };
   
@@ -982,7 +1026,7 @@ if (selectAll) {
   };
   
   dialog.showModal();
-}
+  }
 
   function debounce(fn, delay) {
     let timer = null;
@@ -1107,24 +1151,38 @@ if (selectAll) {
 
 
   
-    function renderBulkActionBar() {
-      const main = document.getElementById('main-content');
-      const bar  = main.querySelector('#bulkActionBar');
-      if (!bar) return;
-      if (window.selectedUnits.length === 0) {
-        bar.innerHTML = "";
-        return;
-      }
+  async function renderBulkActionBar() {
+    const main = document.getElementById('main-content');
+    const bar = main.querySelector('#bulkActionBar');
+    if (!bar) return;
+    if (window.selectedUnits.length === 0) {
+      bar.innerHTML = "";
+      return;
+    }
+    
+    const canManage = await canManageInventory();
+    const canDelete = await canDeleteItems();
+    
+    if (!canManage) {
       bar.innerHTML = `
-        <div class="flex items-center gap-4 p-3 bg-blue-50 dark:bg-blue-900 rounded-lg mb-4 shadow">
-          <span class="font-semibold">${window.selectedUnits.length} selected</span>
-          <button onclick="openBulkMoveDialog()" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded">Bulk Move</button>
-          <button onclick="openBulkStatusDialog()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded">Bulk Status</button>
-          ${isAdmin() ? `<button onclick="bulkDelete()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Bulk Delete</button>` : ""}
+        <div class="flex items-center gap-4 p-3 bg-gray-50 rounded-lg mb-4">
+          <span class="font-semibold text-gray-500">${window.selectedUnits.length} selected (view only)</span>
           <button onclick="clearBulkSelection()" class="ml-auto text-gray-500 hover:text-gray-900">Cancel</button>
         </div>
       `;
+      return;
     }
+    
+    bar.innerHTML = `
+      <div class="flex items-center gap-4 p-3 bg-blue-50 dark:bg-blue-900 rounded-lg mb-4 shadow">
+        <span class="font-semibold">${window.selectedUnits.length} selected</span>
+        <button onclick="openBulkMoveDialog()" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded">Bulk Move</button>
+        <button onclick="openBulkStatusDialog()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded">Bulk Status</button>
+        ${canDelete ? `<button onclick="bulkDelete()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Bulk Delete</button>` : ""}
+        <button onclick="clearBulkSelection()" class="ml-auto text-gray-500 hover:text-gray-900">Cancel</button>
+      </div>
+    `;
+  }
 
   window.openBulkMoveDialog = async function() {
     const selected = window.inventory.filter(i => window.selectedUnits.includes(i.chargerId));
@@ -1230,13 +1288,18 @@ if (selectAll) {
       selected.forEach(unit => {
         const idx = items.findIndex(i => i.chargerId === unit.chargerId);
         if (idx >= 0) {
-          prevStates.push({ ...items[idx] });
-          items[idx].location = moveLoc;
-          if (moveStatus) items[idx].status = moveStatus;
+          prevStates.push({...items[idx]});
+          items[idx].status = newStatus;
           items[idx].lastAction = new Date().toISOString();
-          items[idx].notes = moveComment;
+          if (newStatus === "Installed") {
+            items[idx].location = "Customer Stock";
+            items[idx].isAsset = dialog.querySelector("#privatePublic").value === "Public";
+            items[idx].invoiceNumber = dialog.querySelector("#invoiceNumber").value.trim();
+          }
         }
       });
+      
+      // Update all items at once
       for (const unit of selected) {
         const idx = items.findIndex(i => i.chargerId === unit.chargerId);
         if (idx >= 0) {
@@ -1244,19 +1307,20 @@ if (selectAll) {
         }
       }
     
+      // Create audit log entries
       const newEntries = selected.map(unit => ({
         date: new Date().toISOString(),
-        action: "Bulk Move",
+        action: "Bulk Status Change",
         chargerId: unit.chargerId,
         chargerSerial: unit.chargerSerial,
         simNumber: unit.simNumber,
         product: unit.product,
         from: unit.location,
-        to: moveLoc,
+        to: items.find(i => i.chargerId === unit.chargerId)?.location || unit.location,
         statusFrom: unit.status,
-        statusTo: moveStatus || unit.status,
+        statusTo: newStatus,
         user: getCurrentUserEmail(),
-        comment: moveComment
+        comment: dialog.querySelector("#statusComment").value.trim()
       }));
       await saveAuditLog(newEntries);
     
@@ -1281,25 +1345,33 @@ if (selectAll) {
   };
   
   window.openBulkStatusDialog = async function() {
+    if (!(await canManageInventory())) {
+      showToast("You don't have permission to manage inventory", "red");
+      return;
+    }
+    
     const selected = window.inventory.filter(i => window.selectedUnits.includes(i.chargerId));
     if (!selected.length) return;
   
     const dialog = document.getElementById('actionDialog');
-    // Only show statuses not currently assigned to all selected
-    const statuses = (await loadSettings()).statuses || [];
-    let statusOptions = statuses
-    .filter(s => !selected.every(i => i.status === s))
-    .map(s => `<option value="${s}">${s}</option>`).join("");
+    
+    // Get allowed statuses for the current location
+    const currentLocation = selected[0]?.location;
+    const allowedStatuses = await getStatusesForLocation(currentLocation);
+    
+    const statusOptions = allowedStatuses
+      .filter(s => !selected.every(i => i.status === s))
+      .map(s => `<option value="${s}">${s}</option>`).join("");
   
-    dialog.innerHTML = `
-      <form method="dialog" class="flex flex-col gap-3 w-80">
-        <h3 class="font-bold mb-2">Change Status (${selected.length} Units)</h3>
-        <div class="text-red-600 text-xs min-h-[1em]" id="formError"></div>
-        <label>Set status to:</label>
-        <select id="newStatus" required class="border px-2 py-1 rounded">
-          <option value="">-- Select Status --</option>
-          ${(statuses || []).map(s => `<option value="${s}">${s}</option>`).join("")}
-        </select>
+      dialog.innerHTML = `
+    <form method="dialog" class="flex flex-col gap-3 w-80">
+      <h3 class="font-bold mb-2">Change Status (${selected.length} Units)</h3>
+      <div class="text-red-600 text-xs min-h-[1em]" id="formError"></div>
+      <label>Set status to:</label>
+      <select id="newStatus" required class="border px-2 py-1 rounded">
+        <option value="">-- Select Status --</option>
+        ${statusOptions}
+      </select>
         <div id="privatePublicSection" style="display:none">
           <label class="font-bold">Installed as:</label>
           <select id="privatePublic" class="border px-2 py-1 rounded">
@@ -1497,7 +1569,10 @@ window.toggleActionsMenu = function(idx) {
   };
   
   window.deleteUnit = async function(chargerId) {
-    if (!isAdmin()) return;
+    if (!(await canDeleteItems())) {
+      showToast("You don't have permission to delete items", "red");
+      return;
+    }
     const dialog = document.getElementById('actionDialog');
     dialog.innerHTML = `
       <div class="w-96 p-4">
@@ -1537,6 +1612,10 @@ window.toggleActionsMenu = function(idx) {
   
   // Update openMoveDialog to use getAllowedMoveDestinations:
   window.openMoveDialog = async function(unit) {
+    if (!(await canManageInventory())) {
+      showToast("You don't have permission to move inventory", "red");
+      return;
+    }
     const dialog = document.getElementById('actionDialog');
     // Show loading spinner immediately
     dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Loading...</div>`;
@@ -1787,6 +1866,10 @@ window.toggleActionsMenu = function(idx) {
   };
 
   window.openEditDialog = async function(unit) {
+    if (!(await canManageInventory())) {
+      showToast("You don't have permission to edit inventory", "red");
+      return;
+    }
     const dialog = document.getElementById('actionDialog');
     // Use canonical settings
     const locations = await getAllLocationsWithContractors();
@@ -2216,9 +2299,16 @@ await updateSingleItem(item);
   };
 }
 window.openStatusDialog = async function(unit) {
+  if (!(await canManageInventory())) {
+    showToast("You don't have permission to manage inventory", "red");
+    return;
+  }
+
   const dialog = document.getElementById('actionDialog');
   dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Loading...</div>`;
   dialog.showModal();
+
+  const allowedStatuses = await getStatusesForLocation(unit.location);
 
   dialog.addEventListener('click', function(e) {
     if (e.target === dialog) dialog.close();
@@ -2232,7 +2322,7 @@ window.openStatusDialog = async function(unit) {
       <label>New status:</label>
       <select id="newStatus" required class="border px-2 py-1 rounded">
         <option value="">-- Select Status --</option>
-        ${(statusOptions || []).map(s => `<option value="${s}"${unit.status === s ? " selected" : ""}>${s}</option>`).join("")}
+        ${allowedStatuses.map(s => `<option value="${s}"${unit.status === s ? " selected" : ""}>${s}</option>`).join("")}
       </select>
       <div id="privatePublicSection" style="display:none">
         <label class="font-bold">Installed as:</label>

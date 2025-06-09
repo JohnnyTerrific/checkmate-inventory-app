@@ -1,4 +1,7 @@
 import { loadInventory, loadShipments } from "../js/inventory.js";
+import { getCurrentUserRole } from './utils/users.js';
+import { can } from './utils/permissions.js';
+import { showToast } from './core.js'; // ADD THIS LINE
 import { 
   getDashboardStats, 
   loadSettings,
@@ -9,62 +12,155 @@ import {
 // 1. Stat Cards Data Aggregation
 function injectDashboardPage() {
   document.getElementById('main-content').innerHTML = `
-    <section class="max-w-7xl mx-auto px-3 py-3 space-y-4">
-      <header class="flex items-center justify-between">
-       </header>
+    <section class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+      <!-- Modern Header with Breadcrumbs -->
+      <header class="mb-8">
+        <div class="flex items-center justify-between">
+          <div>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
+            <p class="text-gray-600 dark:text-gray-400 mt-1">Real-time inventory overview and analytics</p>
+          </div>
+          <div class="flex items-center gap-3">
+            <div class="text-sm text-gray-500 dark:text-gray-400">
+              Last updated: <span id="lastUpdated">--</span>
+            </div>
+            <button id="refreshDashboard" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+              Refresh
+            </button>
+          </div>
+        </div>
+      </header>
 
-       <!-- 1️⃣ KPI CARDS -->
-       <div id="stat-cards" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-3"></div>
+      <!-- Enhanced KPI Cards with animations -->
+      <div id="stat-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8"></div>
 
-       <!-- 2️⃣ FILTER BAR -->
-       <div id="dashboardFilters" class="flex flex-wrap gap-3 items-center mb-3">
-         <select id="filterStatus" class="p-2 border rounded text-sm">
-           <option value="">All Statuses</option>
-         </select>
-       </div>
+      <!-- Enhanced Filter Bar -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 mb-6">
+        <div class="flex flex-wrap gap-4 items-center">
+          <div class="flex items-center gap-2">
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Filter by Status:</label>
+            <select id="filterStatus" class="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700">
+              <option value="">All Statuses</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Time Period:</label>
+            <select id="filterPeriod" class="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700">
+              <option value="all">All Time</option>
+              <option value="30">Last 30 Days</option>
+              <option value="90">Last 90 Days</option>
+              <option value="365">Last Year</option>
+            </select>
+          </div>
+        </div>
+      </div>
 
-       <!-- 3️⃣ SHIPMENT COUNTDOWN -->
-       <div id="shipmentCountdown" class="p-3 bg-white dark:bg-gray-800 rounded-xl shadow flex items-center mb-3">
-         <span class="font-medium text-gray-600 dark:text-gray-400 mr-2 text-sm">Next Shipment:</span>
-         <span id="nextShipmentTimer" class="font-bold text-lg text-gray-800 dark:text-gray-100">—</span>
-       </div>
+      <!-- Enhanced Alerts Section -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <!-- Shipment Countdown -->
+        <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900 dark:to-indigo-900 rounded-xl shadow-sm border border-blue-200 dark:border-blue-700 p-6">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-lg font-semibold text-blue-900 dark:text-blue-100 mb-2">Next Shipment</h3>
+              <div id="nextShipmentTimer" class="text-2xl font-bold text-blue-700 dark:text-blue-200">—</div>
+            </div>
+            <div class="w-12 h-12 bg-blue-100 dark:bg-blue-800 rounded-lg flex items-center justify-center">
+              <svg class="w-6 h-6 text-blue-600 dark:text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4-8-4m16 0v10l-8 4-8-4V7"/>
+              </svg>
+            </div>
+          </div>
+        </div>
 
-       <!-- 4️⃣ AGING ALERTS -->
-       <div id="agingAlerts" class="p-3 bg-red-50 dark:bg-red-900 rounded-xl shadow mb-4">
-         <h2 class="font-semibold text-red-700 dark:text-red-300 mb-2 text-sm">Overdue Assignments</h2>
-         <ul id="agingList" class="list-disc list-inside text-gray-700 dark:text-gray-200 text-sm"></ul>
-       </div>
+        <!-- Aging Alerts -->
+        <div id="agingAlerts" class="bg-gradient-to-r from-red-50 to-pink-50 dark:from-red-900 dark:to-pink-900 rounded-xl shadow-sm border border-red-200 dark:border-red-700 p-6">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-red-900 dark:text-red-100">Overdue Assignments</h3>
+            <div class="w-12 h-12 bg-red-100 dark:bg-red-800 rounded-lg flex items-center justify-center">
+              <svg class="w-6 h-6 text-red-600 dark:text-red-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+          </div>
+          <div id="agingList" class="space-y-2"></div>
+        </div>
+      </div>
 
-       <!-- 5️⃣ CHARTS - FIXED HEIGHT CONTAINERS -->
-       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4" style="height: 340px;">
-         <!-- Status Donut -->
-         <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex flex-col items-center h-full">
-           <div class="w-64 h-64 flex items-center justify-center mb-3 flex-shrink-0">
-             <canvas id="statusChart" width="240" height="240" class="!w-[240px] !h-[240px]"></canvas>
-           </div>
-           <div id="statusPills" class="w-full flex-1 min-h-0 flex gap-1 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 pb-1 items-start content-start flex-wrap"></div>
-         </div>
+      <!-- Professional Charts Section -->
+      <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <!-- Status Distribution Chart -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Status Distribution</h3>
+            <button id="statusChartToggle" class="text-sm text-purple-600 hover:text-purple-700">
+              Toggle View
+            </button>
+          </div>
+          <div class="flex flex-col items-center">
+            <div class="w-64 h-64 flex items-center justify-center mb-4">
+              <canvas id="statusChart" width="240" height="240"></canvas>
+            </div>
+            <div id="statusPills" class="w-full flex gap-2 flex-wrap justify-center"></div>
+          </div>
+        </div>
 
-         <!-- Lost Meter -->
-         <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex flex-col items-center h-full">
-           <div class="w-64 h-64 flex items-center justify-center mb-3 flex-shrink-0">
-             <canvas id="lostMeter" width="240" height="240" class="!w-[240px] !h-[240px]"></canvas>
-           </div>
-           <div class="flex flex-col items-center flex-1">
-             <div id="lostMeterLabel" class="text-xs text-center text-gray-700 dark:text-gray-300"></div>
-             <div id="lostMeterLegend" class="text-xs text-gray-500 dark:text-gray-400 text-center mt-1"></div>
-           </div>
-         </div>
+        <!-- Risk Analysis Chart -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Risk Analysis</h3>
+            <div class="flex items-center gap-2">
+              <div class="w-3 h-3 bg-red-500 rounded-full"></div>
+              <span class="text-sm text-gray-600 dark:text-gray-400">Lost/Unknown</span>
+            </div>
+          </div>
+          <div class="flex flex-col items-center">
+            <div class="w-64 h-64 flex items-center justify-center mb-4">
+              <canvas id="lostMeter" width="240" height="240"></canvas>
+            </div>
+            <div class="text-center">
+              <div id="lostMeterLabel" class="text-sm font-medium text-gray-700 dark:text-gray-300"></div>
+              <div id="lostMeterLegend" class="text-xs text-gray-500 dark:text-gray-400 mt-2"></div>
+            </div>
+          </div>
+        </div>
 
-         <!-- Location Bar Chart -->
-         <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex flex-col h-full">
-           <div class="w-64 h-64 mx-auto flex-shrink-0">
-             <canvas id="locationBar" width="240" height="240" class="!w-[240px] !h-[240px]"></canvas>
-           </div>
-         </div>
-       </div>
-</section>
-   `;
+        <!-- Location Distribution Chart -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Top Locations</h3>
+            <button id="locationChartExport" class="text-sm text-purple-600 hover:text-purple-700">
+              Export
+            </button>
+          </div>
+          <div class="w-full h-64">
+            <canvas id="locationBar" width="240" height="240"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Performance Metrics Section -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mt-6">
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Performance Metrics</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div class="text-center">
+            <div class="text-2xl font-bold text-green-600 dark:text-green-400" id="utilizationRate">--</div>
+            <div class="text-sm text-gray-600 dark:text-gray-400">Utilization Rate</div>
+          </div>
+          <div class="text-center">
+            <div class="text-2xl font-bold text-blue-600 dark:text-blue-400" id="avgDeploymentTime">--</div>
+            <div class="text-sm text-gray-600 dark:text-gray-400">Avg. Deployment Time</div>
+          </div>
+          <div class="text-center">
+            <div class="text-2xl font-bold text-purple-600 dark:text-purple-400" id="inventoryTurnover">--</div>
+            <div class="text-sm text-gray-600 dark:text-gray-400">Inventory Turnover</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
 }
   
 function renderStatusDonut(byStatus, originalByStatus) {
@@ -72,12 +168,22 @@ function renderStatusDonut(byStatus, originalByStatus) {
   if (window.statusChart && typeof window.statusChart.destroy === 'function') {
     window.statusChart.destroy();
   }
-  // Keep a reference to the original byStatus for reset
+
   if (!originalByStatus) originalByStatus = byStatus;
 
-  // Group small values together for better readability
+  // Rainbow color palette - SAME as pills
+  const rainbowColors = [
+    '#ff0000', // Red
+    '#ff7f00', // Orange
+    '#ffff00', // Yellow
+    '#00ff00', // Green
+    '#0000ff', // Blue
+    '#4b0082', // Indigo
+    '#8f00ff'  // Violet
+  ];
+
   const total = Object.values(byStatus).reduce((sum, val) => sum + val, 0);
-  const threshold = Math.max(1, Math.floor(total * 0.02)); // 2% minimum or at least 1
+  const threshold = Math.max(1, Math.floor(total * 0.02));
   
   let processedData = {};
   let othersCount = 0;
@@ -90,36 +196,45 @@ function renderStatusDonut(byStatus, originalByStatus) {
     }
   });
   
-  // Add "Others" category if there are grouped items
   if (othersCount > 0) {
     processedData['Others'] = othersCount;
   }
 
+  // Create color array that matches the order of labels
+  const chartLabels = Object.keys(processedData);
+  const chartColors = chartLabels.map((label, index) => rainbowColors[index % rainbowColors.length]);
+
   window.statusChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
-      labels: Object.keys(processedData),
+      labels: chartLabels,
       datasets: [{
         data: Object.values(processedData),
-        backgroundColor: [
-          'rgba(255,0,0,0.7)', 'rgba(255,127,0,0.7)', 'rgba(255,255,0,0.7)',
-          'rgba(0,255,0,0.7)', 'rgba(0,0,255,0.7)', 'rgba(75,0,130,0.7)', 'rgba(143,0,255,0.7)',
-          'rgba(0,255,255,0.7)', 'rgba(255,105,180,0.7)', 'rgba(165,42,42,0.7)'
-        ],
-        borderWidth: 3,
-        borderColor: '#fff',
-        hoverOffset: 12
+        backgroundColor: chartColors, // Use rainbow colors
+        borderWidth: 0,
+        hoverOffset: 8,
+        hoverBorderWidth: 2,
+        hoverBorderColor: '#ffffff'
       }]
     },
     options: {
-      cutout: '65%',
-      responsive: false,
+      cutout: '70%',
+      responsive: true,
       maintainAspectRatio: true,
-      aspectRatio: 1,
+      interaction: {
+        intersect: false,
+        mode: 'index'
+      },
       plugins: {
         legend: { display: false },
-        tooltip: { 
-          enabled: true,
+        tooltip: {
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          titleColor: '#ffffff',
+          bodyColor: '#ffffff',
+          borderColor: '#374151',
+          borderWidth: 1,
+          cornerRadius: 8,
+          displayColors: true,
           callbacks: {
             label: function(context) {
               const label = context.label;
@@ -127,7 +242,6 @@ function renderStatusDonut(byStatus, originalByStatus) {
               const percentage = ((value / total) * 100).toFixed(1);
               
               if (label === 'Others') {
-                // Show breakdown of "Others" in tooltip
                 const otherItems = Object.entries(byStatus)
                   .filter(([status, count]) => count < threshold)
                   .map(([status, count]) => `${status}: ${count}`)
@@ -137,54 +251,42 @@ function renderStatusDonut(byStatus, originalByStatus) {
               return `${label}: ${value} (${percentage}%)`;
             }
           }
-        },
-        datalabels: {
-          display: function(context) {
-            // Only show labels for slices > 5% to avoid overcrowding
-            const percentage = (context.parsed / total) * 100;
-            return percentage > 5;
-          },
-          color: '#222',
-          font: { weight: 'bold', size: 14 },
-          formatter: (value, context) => {
-            const percentage = ((value / total) * 100).toFixed(0);
-            return percentage > 8 ? value : ''; // Only show number if > 8%
-          }
         }
       },
-      // Click handler for filtering
+      animation: {
+        animateRotate: true,
+        duration: 1000
+      },
       onClick: function(evt, elements) {
         if (elements.length > 0) {
           const idx = elements[0].index;
           const status = this.data.labels[idx];
           
-          // Don't allow filtering on "Others" category
-          if (status === 'Others') return;
-          
-          // Only filter if not already filtered to one status
-          if (Object.keys(byStatus).length > 1) {
-            // Filter to just the clicked status
-            const originalValue = byStatus[status];
-            renderStatusDonut({ [status]: originalValue }, originalByStatus);
+          if (status !== 'Others') {
+            if (Object.keys(byStatus).length > 1) {
+              const originalValue = byStatus[status];
+              renderStatusDonut({ [status]: originalValue }, originalByStatus);
+            }
           }
         } else {
-          // If user clicks outside, reset to all statuses
+          // FIXED: Click on empty area to restore full chart
           renderStatusDonut(originalByStatus, originalByStatus);
         }
       }
-    },
-    plugins: [ChartDataLabels]
+    }
   });
 
-  // Use original data for pills (not the grouped data)
-  renderStatusPills(byStatus, (selectedStatus) => {
+  // FIXED: Pass the same rainbow colors to pills
+  renderStatusPills(byStatus, chartLabels, chartColors, (selectedStatus) => {
     showChargerListForStatus(selectedStatus);
   });
 }
   
-function renderStatusPills(statusMap, onClickStatus) {
+function renderStatusPills(statusMap, chartLabels, chartColors, onClickStatus) {
   const container = document.getElementById('statusPills');
-  const rainbowColors = ['#ff0000', '#ff7f00', '#ffff00', '#00ff00', '#0000ff', '#4b0082', '#8f00ff'];
+  const rainbowColors = [
+    '#ff0000', '#ff7f00', '#ffff00', '#00ff00', '#0000ff', '#4b0082', '#8f00ff'
+  ];
 
   const labels = Object.keys(statusMap);
   
@@ -192,14 +294,20 @@ function renderStatusPills(statusMap, onClickStatus) {
   container.className = 'mt-2 flex gap-1 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 pb-1 max-w-full';
   container.style.scrollbarWidth = 'thin';
   
-  container.innerHTML = labels.map((label, i) => `
-    <button 
-      class="px-2 py-1 rounded-full text-white text-xs font-semibold whitespace-nowrap hover:scale-105 transition transform active:ring-2 active:ring-offset-1 flex-shrink-0"
-      style="background:${rainbowColors[i % rainbowColors.length]}"
-      data-status="${label}">
-      ${label}
-    </button>
-  `).join('');
+  container.innerHTML = labels.map((label, i) => {
+    // FIXED: Use same color mapping as chart
+    const colorIndex = chartLabels ? chartLabels.indexOf(label) : i;
+    const color = chartColors && colorIndex >= 0 ? chartColors[colorIndex] : rainbowColors[i % rainbowColors.length];
+    
+    return `
+      <button 
+        class="px-2 py-1 rounded-full text-white text-xs font-semibold whitespace-nowrap hover:scale-105 transition transform active:ring-2 active:ring-offset-1 flex-shrink-0"
+        style="background: ${color}; color: white; text-shadow: 1px 1px 1px rgba(0,0,0,0.5);"
+        data-status="${label}">
+        ${label}
+      </button>
+    `;
+  }).join('');
 
   // Add click handlers
   Array.from(container.children).forEach(btn => {
@@ -208,6 +316,19 @@ function renderStatusPills(statusMap, onClickStatus) {
       onClickStatus(selected);
     });
   });
+  
+  // FIXED: Add "Reset View" button for chart restoration
+  const resetBtn = document.createElement('button');
+  resetBtn.className = 'px-2 py-1 rounded-full text-gray-700 text-xs font-semibold whitespace-nowrap hover:scale-105 transition transform border border-gray-300 flex-shrink-0';
+  resetBtn.style.background = 'white';
+  resetBtn.textContent = 'Reset View';
+  resetBtn.onclick = () => {
+    // Get the original data from the chart instance
+    if (window.statusChart && window.statusChart.originalByStatus) {
+      renderStatusDonut(window.statusChart.originalByStatus, window.statusChart.originalByStatus);
+    }
+  };
+  container.appendChild(resetBtn);
 }
   
   function renderPublicMeter(stats) {
@@ -301,13 +422,17 @@ function renderStatusPills(statusMap, onClickStatus) {
     if (window.lostMeterChart && typeof window.lostMeterChart.destroy === 'function') {
       window.lostMeterChart.destroy();
     }
+  
+    // FIXED: Use rainbow colors for lost meter
+    const colorIndex = Math.min(Math.floor(percent / 15), rainbowColors.length - 1);
+    
     window.lostMeterChart = new Chart(ctx, {
       type: 'doughnut',
       data: {
-        labels: ['Lost', 'Other'],
+        labels: ['Lost/Unknown', 'Other'],
         datasets: [{
           data: [lostCount, stats.total - lostCount],
-          backgroundColor: ['rgba(239, 68, 68, 0.8)', 'rgba(209,213,219,0.4)'],
+          backgroundColor: [rainbowColors[colorIndex], 'rgba(209,213,219,0.4)'],
           borderWidth: 2,
           borderColor: '#fff',
           hoverOffset: 8
@@ -315,12 +440,21 @@ function renderStatusPills(statusMap, onClickStatus) {
       },
       options: {
         cutout: '80%',
+        responsive: true,
+        maintainAspectRatio: true,
         plugins: {
           legend: { display: false },
-          tooltip: { enabled: true },
+          tooltip: { 
+            enabled: true,
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            titleColor: '#ffffff',
+            bodyColor: '#ffffff'
+          },
           datalabels: {
-            color: ['#b91c1c', '#6b7280'],
+            color: ['#ffffff', '#6b7280'],
             font: { weight: 'bold', size: 16 },
+            textStrokeColor: '#000000',
+            textStrokeWidth: 1,
             formatter: (value, context) => {
               if (context.dataIndex === 0) {
                 return `${percent}%`;
@@ -328,40 +462,48 @@ function renderStatusPills(statusMap, onClickStatus) {
               return '';
             }
           }
+        },
+        animation: {
+          animateRotate: true,
+          duration: 1000
         }
       },
-      plugins: [ChartDataLabels]
+      plugins: [ChartDataLabels] // FIXED: Only include if available
     });
   
     // Animate the label (count up)
     const label = document.getElementById('lostMeterLabel');
-    let current = 0;
-    const target = percent;
-    const step = Math.ceil(target / 24) || 1;
-    function animate() {
-      if (current < target) {
-        current += step;
-        if (current > target) current = target;
-        label.textContent = `Lost Chargers: ${current}% (${lostCount} of ${stats.total})`;
-        requestAnimationFrame(animate);
-      } else {
-        label.textContent = `Lost Chargers: ${target}% (${lostCount} of ${stats.total})`;
+    if (label) {
+      let current = 0;
+      const target = percent;
+      const step = Math.ceil(target / 24) || 1;
+      function animate() {
+        if (current < target) {
+          current += step;
+          if (current > target) current = target;
+          label.textContent = `Lost Chargers: ${current}% (${lostCount} of ${stats.total})`;
+          requestAnimationFrame(animate);
+        } else {
+          label.textContent = `Lost Chargers: ${target}% (${lostCount} of ${stats.total})`;
+        }
       }
+      animate();
     }
-    animate();
   
-    // Render a legend below the pie: Model: Qty for Lost chargers
+    // Render a legend below the pie
     const legend = document.getElementById('lostMeterLegend');
-    // Group by model for lost
-    const grouped = {};
-    inventory.filter(i => 
-      (i.location && typeof i.location === "string" && i.location.toLowerCase().includes('lost')) ||
-      (typeof i.status === "string" && i.status.toLowerCase() === "unknown")
-    ).forEach(i => {
-      const model = i.model || 'Unknown';
-      grouped[model] = (grouped[model] || 0) + 1;
-    });
-    legend.innerHTML = Object.entries(grouped).map(([model, qty]) => `${model}: <b>${qty}</b>`).join(', ');
+    if (legend) {
+      // Group by model for lost
+      const grouped = {};
+      inventory.filter(i => 
+        (i.location && typeof i.location === "string" && i.location.toLowerCase().includes('lost')) ||
+        (typeof i.status === "string" && i.status.toLowerCase() === "unknown")
+      ).forEach(i => {
+        const model = i.model || 'Unknown';
+        grouped[model] = (grouped[model] || 0) + 1;
+      });
+      legend.innerHTML = Object.entries(grouped).map(([model, qty]) => `${model}: <b>${qty}</b>`).join(', ');
+    }
   }
 
   // ① Renders the KPI cards
@@ -499,7 +641,15 @@ function renderAgingAlerts(stats, inventory) {
         .join('')
     : '<li>No overdue items</li>';
 }
-  
+
+function getChartPlugins() {
+  const plugins = [];
+  if (typeof ChartDataLabels !== 'undefined') {
+    plugins.push(ChartDataLabels);
+  }
+  return plugins;
+}
+
 async function renderLocationBar(locStats, inventory) {
   const ctx = document.getElementById('locationBar').getContext('2d');
   if (window.locationBarChart && typeof window.locationBarChart.destroy === 'function') {
@@ -517,34 +667,34 @@ async function renderLocationBar(locStats, inventory) {
   const labels = sortedLocations.map(([loc]) => loc);
   const data = sortedLocations.map(([_, count]) => count);
   
-  // Map each location to its parent's color
-  const backgroundColors = labels.map(loc => {
-    const locationConfig = settings.locations.find(l => l.name === loc);
-    if (!locationConfig || !locationConfig.parent) return '#6b7280'; // Default gray
-    
-    const parentContainer = settings.parentContainers.find(p => p.id === locationConfig.parent);
-    return parentContainer?.color || '#6b7280';
+  // Use rainbow colors for locations
+  const backgroundColors = labels.map((loc, index) => {
+    return rainbowColors[index % rainbowColors.length];
   });
   
   const options = {
     indexAxis: 'y',
-    responsive: false,
-    maintainAspectRatio: true,
-    aspectRatio: 1,
+    responsive: true,
+    maintainAspectRatio: false,
     plugins: {
       legend: { display: false },
       tooltip: {
-        enabled: true,
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        titleColor: '#ffffff',
+        bodyColor: '#ffffff',
+        borderColor: '#374151',
+        borderWidth: 1,
+        cornerRadius: 8,
         callbacks: {
           label: function(context) {
             const loc = context.label;
             const inv = context.chart.options.inventory || [];
             
             // Add parent container info to tooltip
-            const locationConfig = settings.locations.find(l => l.name === loc);
+            const locationConfig = settings.locations?.find(l => l.name === loc);
             let parentInfo = "";
             if (locationConfig && locationConfig.parent) {
-              const parent = settings.parentContainers.find(p => p.id === locationConfig.parent);
+              const parent = settings.parentContainers?.find(p => p.id === locationConfig.parent);
               if (parent) {
                 parentInfo = ` (${parent.name})`;
               }
@@ -561,15 +711,17 @@ async function renderLocationBar(locStats, inventory) {
               .map(([model, qty]) => `${model}: ${qty}`)
               .join(', ');
               
-            return [`${loc}${parentInfo}`, modelInfo || 'No data'];
+            return [`${loc}${parentInfo}: ${context.parsed.x}`, modelInfo || 'No data'];
           }
         }
       },
       datalabels: {
         anchor: 'end',
         align: 'right',
-        color: '#6366f1',
-        font: { weight: 'bold', size: 12 }
+        color: '#ffffff',
+        font: { weight: 'bold', size: 12 },
+        textStrokeColor: '#000000',
+        textStrokeWidth: 1
       }
     },
     scales: {
@@ -602,7 +754,7 @@ async function renderLocationBar(locStats, inventory) {
       datasets: [{
         label: 'Chargers by Location',
         data: data,
-        backgroundColor: backgroundColors, // Use parent container colors
+        backgroundColor: backgroundColors,
         borderRadius: 8,
         borderSkipped: false,
         barPercentage: 0.8,
@@ -610,7 +762,7 @@ async function renderLocationBar(locStats, inventory) {
       }]
     },
     options: options,
-    plugins: [ChartDataLabels]
+    plugins: getChartPlugins() // FIXED: Use safe plugin helper
   });
 }
 
@@ -701,21 +853,87 @@ async function showChargerListForLocation(loc, inventory) {
     else setTimeout(() => waitForMainContent(cb), 30);
   }
   
-  // Main Dashboard Loader
-  document.addEventListener('DOMContentLoaded', () => {
-    if (document.body.dataset.page === "dashboard") {
-      waitForMainContent(async () => {
-        injectDashboardPage();
-        const inventory = await loadInventory();
-        const shipments = await loadShipments();
-        const stats = await getDashboardStats(inventory, shipments);
-        await renderStatCards(stats, inventory); // ✅ Add await here
-        // ...other render calls...
-        renderShipmentCountdown(stats.nextShipment);
-        renderAgingAlerts(stats, inventory);
-        renderStatusDonut(stats.byStatus);
-        renderLostMeter(stats, inventory);
-        renderLocationBar(getLocationCounts(inventory), inventory);
+// Update the main loader
+document.addEventListener('DOMContentLoaded', () => {
+  if (document.body.dataset.page === "dashboard") {
+    waitForMainContent(async () => {
+      // Check permissions
+      const canViewDashboard = await can('viewDashboard');
+      if (!canViewDashboard) {
+        document.getElementById('main-content').innerHTML = `
+          <div class="flex items-center justify-center h-64">
+            <div class="text-center">
+              <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">Access Denied</h2>
+              <p class="text-gray-500 dark:text-gray-400">You don't have permission to view the dashboard.</p>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      injectDashboardPage();
+      const inventory = await loadInventory();
+      const shipments = await loadShipments();
+      const stats = await getDashboardStats(inventory, shipments);
+      
+      await renderStatCards(stats, inventory);
+      renderShipmentCountdown(stats.nextShipment);
+      renderAgingAlerts(stats, inventory);
+      
+      // FIXED: Store original data for reset functionality
+      renderStatusDonut(stats.byStatus);
+      if (window.statusChart) {
+        window.statusChart.originalByStatus = stats.byStatus;
+      }
+      
+      renderLostMeter(stats, inventory);
+      await renderLocationBar(getLocationCounts(inventory), inventory);
+      
+      // Add refresh functionality
+      document.getElementById('refreshDashboard').addEventListener('click', async () => {
+        await refreshDashboard();
       });
-    }
-  });
+      
+      // Update last updated time
+      document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+    });
+  }
+});
+
+async function refreshDashboard() {
+  const refreshBtn = document.getElementById('refreshDashboard');
+  refreshBtn.disabled = true;
+  refreshBtn.innerHTML = `
+    <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+    </svg>
+    Refreshing...
+  `;
+  
+  try {
+    const inventory = await loadInventory();
+    const shipments = await loadShipments();
+    const stats = await getDashboardStats(inventory, shipments);
+    
+    await renderStatCards(stats, inventory);
+    renderShipmentCountdown(stats.nextShipment);
+    renderAgingAlerts(stats, inventory);
+    renderStatusDonut(stats.byStatus);
+    renderLostMeter(stats, inventory);
+    await renderLocationBar(getLocationCounts(inventory), inventory);
+    
+    document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+    showToast('Dashboard refreshed successfully', 'green');
+  } catch (error) {
+    console.error('Error refreshing dashboard:', error);
+    showToast('Failed to refresh dashboard', 'red');
+  } finally {
+    refreshBtn.disabled = false;
+    refreshBtn.innerHTML = `
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+      </svg>
+      Refresh
+    `;
+  }
+}
