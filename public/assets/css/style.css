@@ -468,6 +468,39 @@ html.dark .location-title {
     }
   }  
 
+  /* Better mobile landscape support */
+@media (max-width: 900px) {
+  /* Force mobile layout even in landscape */
+  .inventory-scroll-area table {
+    display: none !important;
+  }
+  
+  #mobileInventoryList {
+    display: flex !important;
+    flex-direction: column;
+  }
+  
+  /* Hide FABs in mobile landscape to prevent UI issues */
+  .fab-container,
+  #addItemBtn,
+  #bulkAddBtn, 
+  #addShipmentBtn {
+    display: none !important;
+  }
+  
+  /* Ensure mobile cards work in landscape */
+  .mobile-inv-card {
+    min-height: 80px;
+    touch-action: pan-x pan-y;
+  }
+}
+
+/* Ensure swipe functionality works */
+.mobile-inv-card {
+  touch-action: pan-y; /* Allow vertical scrolling but enable horizontal swipe detection */
+  user-select: none;
+}
+
 /* TABLE DOT MENU */
 .table-dot-menu {
   position: relative;

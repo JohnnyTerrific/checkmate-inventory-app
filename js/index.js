@@ -23,13 +23,6 @@ function updateLoadingProgress(message) {
   }
 }
 
-function updateLoadingProgress(message) {
-  const progressElement = document.getElementById('loadingProgress');
-  if (progressElement) {
-    progressElement.textContent = message;
-  }
-}
-
 function hideLoadingScreen() {
   const loadingScreen = document.getElementById('loadingScreen');
   if (loadingScreen) {

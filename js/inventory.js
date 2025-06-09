@@ -9,7 +9,12 @@ import { db } from './utils/firebase.js';
 import { collection, getDocs, doc, setDoc, deleteDoc, writeBatch, orderBy, query, onSnapshot } from "firebase/firestore";
 window.isInitialLoad = true;
 
-let currentLayoutMode = window.innerWidth < 640 ? 'mobile' : 'desktop';
+let currentLayoutMode = window.innerWidth < 900 ? 'mobile' : 'desktop';
+
+function shouldUseMobileLayout() {
+  // Force mobile layout for screens smaller than 900px OR touch devices
+  return window.innerWidth < 900 || ('ontouchstart' in window);
+}
 
 function isAdmin() {
   // Replace with your actual admin email(s) or UID(s)
@@ -533,78 +538,69 @@ async function getStatusesForLocation(loc) {
 }
 
 
-  function renderInventoryTable(main) {
-    if (window.innerWidth < 640) {
-      renderInventoryMobile(main, window.inventory);
-      return;
-    }
-    main.innerHTML = `
-      <div class="flex flex-wrap gap-3 mb-4 items-center">
-        <input id="searchInput" type="text" placeholder="Search Anything" class="border px-3 py-1 rounded" style="min-width:200px;">
-        <select id="filterStatus" class="border px-3 py-1 rounded">
-          <option value="">All Statuses</option>
-          ${[...new Set(window.inventory.map(i => i.status))].map(s => `<option value="${s}">${s}</option>`).join("")}
-        </select>
-        <select id="filterLocation" class="border px-3 py-1 rounded">
-          <option value="">All Locations</option>
-          ${[...new Set(window.inventory.map(i => i.location))].map(l => `<option value="${l}">${l}</option>`).join("")}
-        </select>
-        <button id="downloadCSV" class="bg-gray-200 px-3 py-1 rounded">Download CSV</button>
-        <button id="downloadExcel" class="bg-gray-200 px-3 py-1 rounded">Download Excel</button>
-      </div>
-      <div class="inventory-scroll-area min-h-[340px] overflow-x-auto" style="max-height:70vh;">
-        <table class="min-w-full table-auto border rounded-xl bg-white dark:bg-gray-900 shadow">
-          <thead class="table-header">
-            <tr>
-              <th class="p-2 border-b"><input type="checkbox" id="selectAll"></th>
-              <th class="p-2 border-b">Model</th>
-              <th class="p-2 border-b">Charger ID</th>
-              <th class="p-2 border-b">Serial</th>
-              <th class="p-2 border-b">SIM Number</th>
-              <th class="p-2 border-b">Status</th>
-              <th class="p-2 border-b">Location</th>
-              <th class="p-2 border-b">Last Action</th>
-              <th class="p-2 border-b">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="inventoryTableBody"></tbody>
-        </table>
-      </div>
-      <div id="bulkActionBar"></div>
-      <div id="paginationBar"></div>
-    `;
+function renderInventoryTable(main) {
+  if (shouldUseMobileLayout()) {
+    renderInventoryMobile(main, window.inventory);
+    return;
+  }
+  
+  main.innerHTML = `
+    <div class="flex flex-wrap gap-3 mb-4 items-center">
+      <input id="searchInput" type="text" placeholder="Search Anything" class="border px-3 py-1 rounded" style="min-width:200px;">
+      <select id="filterStatus" class="border px-3 py-1 rounded">
+        <option value="">All Statuses</option>
+        ${[...new Set(window.inventory.map(i => i.status))].map(s => `<option value="${s}">${s}</option>`).join("")}
+      </select>
+      <select id="filterLocation" class="border px-3 py-1 rounded">
+        <option value="">All Locations</option>
+        ${[...new Set(window.inventory.map(i => i.location))].map(l => `<option value="${l}">${l}</option>`).join("")}
+      </select>
+      <button id="downloadCSV" class="bg-gray-200 px-3 py-1 rounded">Download CSV</button>
+      <button id="downloadExcel" class="bg-gray-200 px-3 py-1 rounded">Download Excel</button>
+    </div>
+    <div class="inventory-scroll-area min-h-[340px] overflow-x-auto" style="max-height:70vh;">
+      <table class="min-w-full table-auto border rounded-xl bg-white dark:bg-gray-900 shadow">
+        <thead class="table-header">
+          <tr>
+            <th class="p-2 border-b"><input type="checkbox" id="selectAll"></th>
+            <th class="p-2 border-b">Model</th>
+            <th class="p-2 border-b">Charger ID</th>
+            <th class="p-2 border-b">Serial</th>
+            <th class="p-2 border-b">SIM Number</th>
+            <th class="p-2 border-b">Status</th>
+            <th class="p-2 border-b">Location</th>
+            <th class="p-2 border-b">Last Action</th>
+            <th class="p-2 border-b">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="inventoryTableBody"></tbody>
+      </table>
+    </div>
+    <div id="bulkActionBar"></div>
+    <div id="paginationBar"></div>
+  `;
 
-// Download buttons - with better error handling
-setTimeout(() => {
+  // Attach download handlers immediately, not in setTimeout
   const csvBtn = main.querySelector('#downloadCSV');
   const excelBtn = main.querySelector('#downloadExcel');
   
   if (csvBtn) {
     csvBtn.onclick = (e) => {
       e.preventDefault();
+      e.stopPropagation();
       console.log('CSV download clicked');
-      if (typeof window.downloadInventoryCSV === 'function') {
-        window.downloadInventoryCSV();
-      } else {
-        console.error('downloadInventoryCSV function not found');
-        showToast('Download function not available', 'red');
-      }
+      window.downloadInventoryCSV();
     };
   }
 
   if (excelBtn) {
     excelBtn.onclick = (e) => {
       e.preventDefault();
+      e.stopPropagation();
       console.log('Excel download clicked');
-      if (typeof window.downloadInventoryExcel === 'function') {
-        window.downloadInventoryExcel();
-      } else {
-        console.error('downloadInventoryExcel function not found');
-        showToast('Download function not available', 'red');
-      }
+      window.downloadInventoryExcel();
     };
   }
-}, 100);
 
   injectInventoryFABs();
   
@@ -615,30 +611,29 @@ setTimeout(() => {
   setTimeout(() => {
     initializeInventorySearch();
   }, 50);
+}
 
+window.addEventListener('resize', () => {
+  const newMode = shouldUseMobileLayout() ? 'mobile' : 'desktop';
+  if (newMode !== currentLayoutMode) {
+    currentLayoutMode = newMode;
+    injectInventoryFABs();
+    
+    // Re-render the table
+    renderInventoryTable(document.getElementById('main-content'));
+    
+    // Re-attach event handlers after a delay
+    setTimeout(() => {
+      const addItemBtn = document.getElementById("addItemBtn");
+      const bulkAddBtn = document.getElementById("bulkAddBtn");
+      const addShipmentBtn = document.getElementById("addShipmentBtn");
+      
+      if (addItemBtn) addItemBtn.onclick = showAddItemDialog;
+      if (bulkAddBtn) bulkAddBtn.onclick = window.openBulkAddDialog;
+      if (addShipmentBtn) addShipmentBtn.onclick = window.openCreateShipmentDialog;
+    }, 100);
   }
-
-  window.addEventListener('resize', () => {
-    const newMode = window.innerWidth < 640 ? 'mobile' : 'desktop';
-    if (newMode !== currentLayoutMode) {
-      currentLayoutMode = newMode;
-      injectInventoryFABs();
-      
-      // Re-render the table
-      renderInventoryTable(document.getElementById('main-content'));
-      
-      // Re-attach event handlers after a delay
-      setTimeout(() => {
-        const addItemBtn = document.getElementById("addItemBtn");
-        const bulkAddBtn = document.getElementById("bulkAddBtn");
-        const addShipmentBtn = document.getElementById("addShipmentBtn");
-        
-        if (addItemBtn) addItemBtn.onclick = showAddItemDialog;
-        if (bulkAddBtn) bulkAddBtn.onclick = window.openBulkAddDialog;
-        if (addShipmentBtn) addShipmentBtn.onclick = window.openCreateShipmentDialog;
-      }, 100);
-    }
-  });
+});
 
   // Add this function after the renderInventoryTable function
   function initializeInventorySearch() {
@@ -757,8 +752,6 @@ const location = filterLocation.value;
         </td>
       </tr>
     `).join("");
-  
-    addMobileSwipeHandlers();
   
     // Menu logic
     tbody.querySelectorAll('.table-dot-menu > button').forEach((btn, idx) => {
@@ -891,7 +884,7 @@ if (selectAll) {
   
     // Ensure all dialogs exist after clearing main content
     ensureDialogs();
-  
+    
     const list = main.querySelector('#mobileInventoryList');
     renderMobileInventoryList(list, items);
   
@@ -906,14 +899,15 @@ if (selectAll) {
       renderMobileInventoryList(list, filtered);
     }, 250);
   
-    // Scan button logic
+    // Fix scan button logic
     main.querySelector('#scanBtn').onclick = () => {
       if (typeof window.openBarcodeScanner === 'function') {
         window.openBarcodeScanner(result => {
           if (result) {
             const found = window.inventory.find(i => i.chargerSerial === result || i.chargerId === result);
-            if (found && typeof window.openDetailsDialog === 'function') {
-              window.openDetailsDialog(found);
+            if (found) {
+              // Open the mobile search dialog instead of details
+              openMobileSearchDialog(found);
             } else {
               showToast("Not found", "red");
             }
@@ -928,6 +922,27 @@ if (selectAll) {
         showAddItemDialog();
       }
     };
+  }
+
+  function openMobileSearchDialog(unit) {
+    const dialog = document.getElementById('actionDialog');
+    dialog.innerHTML = `
+      <div class="w-full max-w-sm mx-auto">
+        <div class="text-xl font-bold mb-4 text-purple-700 dark:text-purple-300">Unit Found</div>
+        <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 mb-4">
+          <div class="font-bold text-lg">${unit.chargerId}</div>
+          <div class="text-sm text-gray-600 dark:text-gray-300">${unit.status} • ${unit.location}</div>
+          <div class="text-sm text-gray-400">${unit.model || unit.product || ""}${unit.chargerSerial ? " • " + unit.chargerSerial : ""}</div>
+        </div>
+        <div class="flex flex-col gap-2">
+          <button type="button" class="w-full bg-purple-600 text-white py-2 px-4 rounded" onclick='window.openDetailsDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")});document.getElementById("actionDialog").close()'>View Details</button>
+          <button type="button" class="w-full bg-blue-600 text-white py-2 px-4 rounded" onclick='window.openMoveDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")});document.getElementById("actionDialog").close()'>Move Unit</button>
+          <button type="button" class="w-full bg-green-600 text-white py-2 px-4 rounded" onclick='window.openEditDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")});document.getElementById("actionDialog").close()'>Edit Unit</button>
+          <button type="button" class="w-full bg-gray-300 dark:bg-gray-700 py-2 px-4 rounded" onclick="document.getElementById('actionDialog').close()">Close</button>
+        </div>
+      </div>
+    `;
+    dialog.showModal();
   }
 
   function debounce(fn, delay) {
@@ -969,7 +984,24 @@ if (selectAll) {
       </div>
     `).join('');
   
-    // Re-attach swipe handlers with proper error handling
+    setTimeout(() => {
+      attachMobileSwipeHandlers(list);
+    }, 100);
+  }
+  
+  function attachMobileSwipeHandlers(list) {
+    // Get the current filtered items for the mobile list
+    const searchInput = document.querySelector('#searchInput');
+    const q = searchInput ? searchInput.value.toLowerCase() : '';
+    
+    let items = window.inventory;
+    if (q) {
+      items = window.inventory.filter(i =>
+        [i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status, i.location, i.notes]
+          .some(f => (f || '').toLowerCase().includes(q))
+      );
+    }
+  
     list.querySelectorAll('.mobile-inv-card').forEach(card => {
       let startX = null;
       let dx = 0;
@@ -999,14 +1031,8 @@ if (selectAll) {
             setTimeout(() => {
               card.style.transform = '';
               const unit = items.find(i => i.chargerId === card.dataset.id);
-              if (unit) {
-                // Ensure dialog exists before calling
-                ensureDialogs();
-                if (typeof window.openEditDialog === 'function') {
-                  window.openEditDialog(unit);
-                } else {
-                  console.warn('openEditDialog function not available');
-                }
+              if (unit && typeof window.openEditDialog === 'function') {
+                window.openEditDialog(unit);
               }
             }, 180);
           } else if (dx > 50 && !swiped) { // Swipe right for Move
@@ -1016,14 +1042,8 @@ if (selectAll) {
             setTimeout(() => {
               card.style.transform = '';
               const unit = items.find(i => i.chargerId === card.dataset.id);
-              if (unit) {
-                // Ensure dialog exists before calling
-                ensureDialogs();
-                if (typeof window.openMoveDialog === 'function') {
-                  window.openMoveDialog(unit);
-                } else {
-                  console.warn('openMoveDialog function not available');
-                }
+              if (unit && typeof window.openMoveDialog === 'function') {
+                window.openMoveDialog(unit);
               }
             }, 180);
           } 
@@ -1046,54 +1066,6 @@ if (selectAll) {
     });
   }
 
-function addMobileSwipeHandlers() {
-  const main = document.getElementById('main-content');
-  main.querySelectorAll('.inv-row').forEach(row => {
-    let startX = null;
-    let swiped = false;
-    row.addEventListener('touchstart', (e) => {
-      startX = e.touches[0].clientX;
-      swiped = false;
-    }, {passive: true});
-    row.addEventListener('touchmove', (e) => {
-      if (startX === null) return;
-      const dx = e.touches[0].clientX - startX;
-      if (dx < -50 && !swiped) { // Swipe left for Move
-        row.classList.add('swiped');
-        const idx = row.dataset.idx;
-        const swipeDiv = document.getElementById(`row-swipe-actions-${idx}`);
-        if (swipeDiv) swipeDiv.classList.remove('hidden');
-        swiped = true;
-      } else if (dx > 50 && !swiped) { // Swipe right for Assign to Contractor
-        row.classList.add('swiped-right');
-        const idx = row.dataset.idx;
-        const chargerId = row.dataset.id;
-        const unit = window.inventory.find(i => i.chargerId === chargerId);
-        if (unit && unit.location === 'Technician/Contractor') { // Only allow from Technician/Contractor
-          openAssignContractorDialog(unit);
-        }
-        swiped = true;
-      }
-    }, {passive: true});
-    row.addEventListener('touchend', () => {
-      startX = null;
-      if (!row.classList.contains('swiped-right')) {
-        row.classList.remove('swiped');
-        const idx = row.dataset.idx;
-        const swipeDiv = document.getElementById(`row-swipe-actions-${idx}`);
-        if (swipeDiv) swipeDiv.classList.add('hidden');
-      }
-    });
-    document.addEventListener('touchstart', (e) => {
-      if (!row.contains(e.target)) {
-        row.classList.remove('swiped', 'swiped-right');
-        const idx = row.dataset.idx;
-        const swipeDiv = document.getElementById(`row-swipe-actions-${idx}`);
-        if (swipeDiv) swipeDiv.classList.add('hidden');
-      }
-    }, {passive: true});
-  });
-}  
 
   
     function renderBulkActionBar() {
@@ -2460,6 +2432,7 @@ window.showAddItemDialog = showAddItemDialog;
 window.openBarcodeScanner = openBarcodeScanner;
 window.performGlobalSearch = performGlobalSearch;
 window.openGlobalSearchDialog = openGlobalSearchDialog;
+window.openMobileSearchDialog = openMobileSearchDialog;
 window.openAssignContractorDialog = openAssignContractorDialog;
 window.downloadInventoryCSV = function() {
   const items = [...window.inventory];
