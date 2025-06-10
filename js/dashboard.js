@@ -12,7 +12,7 @@ import {
 // 1. Stat Cards Data Aggregation
 function injectDashboardPage() {
   document.getElementById('main-content').innerHTML = `
-    <section class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+    <section class="max-w-full mx-auto px-2 py-6 space-y-6">
       <!-- Modern Header with Breadcrumbs -->
       <header class="mb-8">
         <div class="flex items-center justify-between">
@@ -89,8 +89,8 @@ function injectDashboardPage() {
         </div>
       </div>
 
-      <!-- Professional Charts Section -->
-      <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      <!-- Charts and Performance Section -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         <!-- Status Distribution Chart -->
         <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
           <div class="flex items-center justify-between mb-4">
@@ -127,36 +127,36 @@ function injectDashboardPage() {
           </div>
         </div>
 
-        <!-- Location Distribution Chart -->
+        <!-- MOVED: Performance Metrics Section - Now takes 1 column -->
         <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Top Locations</h3>
-            <button id="locationChartExport" class="text-sm text-purple-600 hover:text-purple-700">
-              Export
-            </button>
-          </div>
-          <div class="w-full h-64">
-            <canvas id="locationBar" width="240" height="240"></canvas>
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Performance Metrics</h3>
+          <div class="space-y-4">
+            <div class="text-center">
+              <div class="text-2xl font-bold text-green-600 dark:text-green-400" id="utilizationRate">--</div>
+              <div class="text-sm text-gray-600 dark:text-gray-400">Utilization Rate</div>
+            </div>
+            <div class="text-center">
+              <div class="text-2xl font-bold text-blue-600 dark:text-blue-400" id="avgDeploymentTime">--</div>
+              <div class="text-sm text-gray-600 dark:text-gray-400">Avg. Deployment Time</div>
+            </div>
+            <div class="text-center">
+              <div class="text-2xl font-bold text-purple-600 dark:text-purple-400" id="inventoryTurnover">--</div>
+              <div class="text-sm text-gray-600 dark:text-gray-400">Inventory Turnover</div>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Performance Metrics Section -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mt-6">
-        <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Performance Metrics</h3>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div class="text-center">
-            <div class="text-2xl font-bold text-green-600 dark:text-green-400" id="utilizationRate">--</div>
-            <div class="text-sm text-gray-600 dark:text-gray-400">Utilization Rate</div>
-          </div>
-          <div class="text-center">
-            <div class="text-2xl font-bold text-blue-600 dark:text-blue-400" id="avgDeploymentTime">--</div>
-            <div class="text-sm text-gray-600 dark:text-gray-400">Avg. Deployment Time</div>
-          </div>
-          <div class="text-center">
-            <div class="text-2xl font-bold text-purple-600 dark:text-purple-400" id="inventoryTurnover">--</div>
-            <div class="text-sm text-gray-600 dark:text-gray-400">Inventory Turnover</div>
-          </div>
+            <!-- FULL WIDTH Location Distribution Chart - Gets ALL the space it wants! -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Top Locations & Model Distribution</h3>
+          <button id="locationChartExport" class="text-sm text-purple-600 hover:text-purple-700">
+            Export
+          </button>
+        </div>
+        <div class="w-full" style="height: 700px;"> <!-- Increased from 600px to 700px -->
+          <canvas id="locationBar"></canvas>
         </div>
       </div>
     </section>
@@ -616,7 +616,7 @@ function renderShipmentCountdown(nextTs) {
 }
 
 
-function renderAgingAlerts(stats, inventory) {
+async function renderAgingAlerts(stats, inventory) {
   const list = document.getElementById('agingList');
   if (stats.overdueCount === 0) {
     return list.innerHTML = '<li>No overdue items</li>';
@@ -625,7 +625,7 @@ function renderAgingAlerts(stats, inventory) {
   const threshold = 14 * 24 * 60 * 60 * 1000;
 
   // Get contractor names from settings
-  const settings = loadSettings();
+  const settings = await loadSettings();
   const contractorNames = (settings.contractors || []).map(c => c.name);
 
   // Only show overdue items assigned to a contractor
@@ -650,120 +650,278 @@ function getChartPlugins() {
   return plugins;
 }
 
-async function renderLocationBar(locStats, inventory) {
+async function renderLocationStackedBar(locStats, inventory) {
   const ctx = document.getElementById('locationBar').getContext('2d');
   if (window.locationBarChart && typeof window.locationBarChart.destroy === 'function') {
     window.locationBarChart.destroy();
   }
-  
-  // Load settings to get parent container information
+
   const settings = await loadSettings();
-  
-  // Sort locations by count (descending) and get top 10
   const sortedLocations = Object.entries(locStats)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 10);
+    .slice(0, 15);
+
+  // Get all unique models and shorten their names for the legend
+  const allModels = [...new Set(inventory.map(i => i.model || 'Unknown'))];
+  const modelShortNames = {};
   
-  const labels = sortedLocations.map(([loc]) => loc);
-  const data = sortedLocations.map(([_, count]) => count);
-  
-  // Use rainbow colors for locations
-  const backgroundColors = labels.map((loc, index) => {
-    return rainbowColors[index % rainbowColors.length];
+  allModels.forEach(model => {
+    if (model.includes('SMART HOME MINI WALLBOX')) {
+      modelShortNames[model] = model.replace('SMART HOME MINI WALLBOX', 'SHMW');
+    } else if (model.includes('DC Fast EV Charger')) {
+      modelShortNames[model] = model.replace('DC Fast EV Charger', 'DC Fast');
+    } else if (model.includes('EV WALLBOX Pro-Smart OCPP')) {
+      modelShortNames[model] = 'EV WALLBOX Pro';
+    } else if (model.length > 25) {
+      modelShortNames[model] = model.substring(0, 22) + '...';
+    } else {
+      modelShortNames[model] = model;
+    }
   });
   
-  const options = {
-    indexAxis: 'y',
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { display: false },
-      tooltip: {
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
-        titleColor: '#ffffff',
-        bodyColor: '#ffffff',
-        borderColor: '#374151',
-        borderWidth: 1,
-        cornerRadius: 8,
-        callbacks: {
-          label: function(context) {
-            const loc = context.label;
-            const inv = context.chart.options.inventory || [];
-            
-            // Add parent container info to tooltip
-            const locationConfig = settings.locations?.find(l => l.name === loc);
-            let parentInfo = "";
-            if (locationConfig && locationConfig.parent) {
-              const parent = settings.parentContainers?.find(p => p.id === locationConfig.parent);
-              if (parent) {
-                parentInfo = ` (${parent.name})`;
-              }
-            }
-            
-            // Group by model for this location
-            const grouped = {};
-            inv.filter(u => (u.location || 'Unknown') === loc).forEach(u => {
-              const model = u.model || 'Unknown';
-              grouped[model] = (grouped[model] || 0) + 1;
-            });
-            
-            const modelInfo = Object.entries(grouped)
-              .map(([model, qty]) => `${model}: ${qty}`)
-              .join(', ');
-              
-            return [`${loc}${parentInfo}: ${context.parsed.x}`, modelInfo || 'No data'];
-          }
-        }
-      },
-      datalabels: {
-        anchor: 'end',
-        align: 'right',
-        color: '#ffffff',
-        font: { weight: 'bold', size: 12 },
-        textStrokeColor: '#000000',
-        textStrokeWidth: 1
-      }
-    },
-    scales: {
-      x: {
-        beginAtZero: true,
-        grid: { display: false },
-        ticks: { font: { size: 11 } }
-      },
-      y: {
-        grid: { display: false },
-        ticks: { font: { size: 11 } }
-      }
-    },
-    onClick: function(evt, elements) {
-      if (elements.length > 0) {
-        const idx = elements[0].index;
-        const loc = this.data.labels[idx];
-        showChargerListForLocation(loc, inventory);
-      }
-    }
-  };
-  
-  // Inject inventory for tooltip callbacks
-  options.inventory = inventory;
+  // Create datasets for each model
+  const datasets = allModels.map((model, index) => {
+    const data = sortedLocations.map(([loc]) => {
+      return inventory.filter(i => i.location === loc && (i.model || 'Unknown') === model).length;
+    });
+
+    return {
+      label: modelShortNames[model],
+      data: data,
+      backgroundColor: rainbowColors[index % rainbowColors.length] + 'DD',
+      borderColor: rainbowColors[index % rainbowColors.length],
+      borderWidth: 1,
+      borderRadius: 2,
+      originalModel: model
+    };
+  }).filter(dataset => dataset.data.some(val => val > 0));
 
   window.locationBarChart = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: labels,
-      datasets: [{
-        label: 'Chargers by Location',
-        data: data,
-        backgroundColor: backgroundColors,
-        borderRadius: 8,
-        borderSkipped: false,
-        barPercentage: 0.8,
-        categoryPercentage: 0.9
-      }]
+      labels: sortedLocations.map(([loc]) => loc),
+      datasets: datasets
     },
-    options: options,
-    plugins: getChartPlugins() // FIXED: Use safe plugin helper
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'index', // FIXED: Better interaction mode
+        intersect: false
+      },
+      plugins: {
+        legend: { 
+          display: true,
+          position: 'right',
+          labels: { 
+            boxWidth: 12, 
+            font: { size: 10 },
+            padding: 15,
+            usePointStyle: true,
+            pointStyle: 'circle'
+          }
+        },
+        tooltip: {
+          mode: 'index',
+          intersect: false,
+          backgroundColor: 'rgba(0, 0, 0, 0.9)', // FIXED: More opaque
+          titleColor: '#ffffff',
+          bodyColor: '#ffffff',
+          borderColor: '#374151',
+          borderWidth: 1,
+          cornerRadius: 8,
+          padding: 12, // FIXED: Better padding
+          displayColors: true,
+          callbacks: {
+            title: function(context) {
+              const loc = context[0].label;
+              const locationConfig = settings.locations?.find(l => l.name === loc);
+              let parentInfo = "";
+              if (locationConfig?.parent) {
+                const parent = settings.parentContainers?.find(p => p.id === locationConfig.parent);
+                if (parent) parentInfo = ` (${parent.name})`;
+              }
+              return loc + parentInfo;
+            },
+            label: function(context) {
+              const dataset = context.dataset;
+              const originalModel = dataset.originalModel || dataset.label;
+              const value = context.parsed.x;
+              return `${originalModel}: ${value} units`;
+            },
+            footer: function(context) {
+              const total = context.reduce((sum, item) => sum + item.parsed.x, 0);
+              return `Total: ${total} units`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          beginAtZero: true,
+          ticks: {
+            callback: function(value) {
+              return Number.isInteger(value) ? value.toString() : '';
+            },
+            font: { size: 11 },
+            stepSize: 1
+          },
+          stacked: true,
+          grid: {
+            color: 'rgba(0, 0, 0, 0.1)',
+            lineWidth: 1
+          },
+          title: {
+            display: true,
+            text: 'Number of Units',
+            font: { size: 12, weight: 'bold' }
+          }
+        },
+        y: {
+          stacked: true,
+          ticks: { 
+            font: { size: 11 },
+            maxRotation: 0,
+            padding: 15,
+            callback: function(value, index) {
+              const label = this.getLabelForValue(value);
+              return label.length > 20 ? label.substring(0, 17) + '...' : label;
+            }
+          },
+          grid: {
+            display: false
+          },
+          title: {
+            display: true,
+            text: 'Locations',
+            font: { size: 12, weight: 'bold' }
+          }
+        }
+      },
+      onClick: function(evt, elements) {
+        // FIXED: Better click detection for both bars and Y-axis area
+        if (elements.length > 0) {
+          const idx = elements[0].index;
+          const loc = this.data.labels[idx];
+          showLocationModelBreakdown(loc, inventory);
+        } else {
+          // FIXED: Handle clicks on Y-axis labels
+          const rect = ctx.canvas.getBoundingClientRect();
+          const x = evt.clientX - rect.left;
+          const y = evt.clientY - rect.top;
+          const chartArea = this.chartArea;
+          
+          // Check if click is on Y-axis label area
+          if (x >= 0 && x <= chartArea.left && y >= chartArea.top && y <= chartArea.bottom) {
+            const locationIndex = Math.floor((y - chartArea.top) / (chartArea.height / sortedLocations.length));
+            
+            if (locationIndex >= 0 && locationIndex < sortedLocations.length) {
+              const [loc] = sortedLocations[locationIndex];
+              showLocationModelBreakdown(loc, inventory);
+            }
+          }
+        }
+      }
+    }
   });
+}
+
+async function showLocationModelBreakdown(loc, inventory) {
+  let dialog = document.getElementById('chargerListDialog');
+  if (!dialog) {
+    dialog = document.createElement('dialog');
+    dialog.id = 'chargerListDialog';
+    dialog.className = 'rounded-xl p-6 max-w-2xl';
+    document.body.appendChild(dialog);
+  }
+  
+  // Load settings to get parent container information
+  const settings = await loadSettings();
+  const chargers = inventory.filter(i => i.location === loc);
+  
+  // Get model breakdown for this location
+  const locationModels = {};
+  chargers.forEach(i => {
+    const model = i.model || 'Unknown';
+    locationModels[model] = (locationModels[model] || 0) + 1;
+  });
+  
+  // Get parent container info
+  const locationConfig = settings.locations?.find(l => l.name === loc);
+  let parentInfo = "";
+  if (locationConfig?.parent) {
+    const parent = settings.parentContainers?.find(p => p.id === locationConfig.parent);
+    if (parent) {
+      parentInfo = `<div class="text-sm text-gray-500 mb-3">Parent Container: <span class="font-medium">${parent.name}</span></div>`;
+    }
+  }
+  
+  // Sort models by quantity (descending)
+  const sortedModels = Object.entries(locationModels).sort((a, b) => b[1] - a[1]);
+  
+  dialog.innerHTML = `
+    <div class="mb-4">
+      <div class="text-xl font-bold text-purple-700 dark:text-purple-300 mb-2">
+        ${loc} - Model Distribution
+      </div>
+      ${parentInfo}
+      <div class="text-sm text-gray-600 dark:text-gray-400">
+        Total Units: <span class="font-bold">${chargers.length}</span>
+      </div>
+    </div>
+    
+    <div class="overflow-auto mb-6" style="max-height: 400px;">
+      <div class="grid gap-3">
+        ${sortedModels.map(([model, count]) => {
+          const percentage = ((count / chargers.length) * 100).toFixed(1);
+          const colorIndex = Object.keys(locationModels).indexOf(model);
+          const color = rainbowColors[colorIndex % rainbowColors.length];
+          
+          return `
+            <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+              <div class="flex items-start justify-between mb-2 gap-4">
+                <div class="font-semibold text-gray-900 dark:text-gray-100 flex-1 min-w-0">
+                  <div class="break-words">${model}</div>
+                </div>
+                <div class="text-lg font-bold flex-shrink-0" style="color: ${color}">${count} units</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="flex-1 bg-gray-200 dark:bg-gray-600 rounded-full h-2">
+                  <div class="h-2 rounded-full transition-all duration-500" 
+                       style="width: ${percentage}%; background: ${color}"></div>
+                </div>
+                <span class="text-sm text-gray-600 dark:text-gray-400 font-medium flex-shrink-0">${percentage}%</span>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+    
+    <div class="flex justify-between items-center">
+      <button class="text-sm text-purple-600 hover:text-purple-700 underline" 
+              id="viewIndividualUnitsBtn">
+        View Individual Units
+      </button>
+      <button class="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 transition" 
+              id="closeDialogBtn">
+        Close
+      </button>
+    </div>
+  `;
+  
+  // FIXED: Add event listeners after DOM creation
+  document.getElementById('viewIndividualUnitsBtn').addEventListener('click', () => {
+    showChargerListForLocation(loc, inventory);
+  });
+  
+  document.getElementById('closeDialogBtn').addEventListener('click', () => {
+    dialog.close();
+  });
+  
+  dialog.showModal();
 }
 
 async function showChargerListForStatus(status) {
@@ -796,7 +954,7 @@ async function showChargerListForLocation(loc, inventory) {
   if (!dialog) {
     dialog = document.createElement('dialog');
     dialog.id = 'chargerListDialog';
-    dialog.className = 'rounded-xl p-5';
+    dialog.className = 'rounded-xl p-5 max-w-2xl w-full mx-4';
     document.body.appendChild(dialog);
   }
   
@@ -805,31 +963,54 @@ async function showChargerListForLocation(loc, inventory) {
   const chargers = inventory.filter(i => i.location === loc);
   
   // Get parent container info
-  const locationConfig = settings.locations.find(l => l.name === loc);
+  const locationConfig = settings.locations?.find(l => l.name === loc);
   let parentInfo = "";
-  if (locationConfig && locationConfig.parent) {
-    const parent = settings.parentContainers.find(p => p.id === locationConfig.parent);
+  if (locationConfig?.parent) {
+    const parent = settings.parentContainers?.find(p => p.id === locationConfig.parent);
     if (parent) {
       parentInfo = `<div class="text-sm text-gray-500">Parent: ${parent.name}</div>`;
     }
   }
   
   dialog.innerHTML = `
-    <div class="text-xl font-bold mb-2 text-purple-700 dark:text-purple-300">Chargers at ${loc}</div>
-    ${parentInfo}
-    <div class="overflow-auto" style="max-height:350px">
+    <div class="mb-4">
+      <div class="text-xl font-bold text-purple-700 dark:text-purple-300 mb-2">
+        Individual Units at ${loc}
+      </div>
+      ${parentInfo}
+      <button class="text-sm text-purple-600 hover:text-purple-700 underline" 
+              id="backToModelBtn">
+        ← Back to Model Breakdown
+      </button>
+    </div>
+    
+    <div class="overflow-auto mb-4" style="max-height:350px">
       ${chargers.map(i =>
         `<div class="mb-2 p-2 bg-gray-50 dark:bg-gray-800 rounded shadow">
           <div><b>ID:</b> ${i.chargerId}</div>
           <div><b>Status:</b> ${i.status}</div>
-          <div><b>Model:</b> ${i.model}</div>
+          <div><b>Model:</b> <span class="break-words">${i.model}</span></div>
         </div>`
       ).join("")}
     </div>
-    <div class="flex justify-end mt-4">
-      <button class="bg-purple-600 text-white px-4 py-2 rounded" onclick="document.getElementById('chargerListDialog').close()">Close</button>
+    
+    <div class="flex justify-end">
+      <button class="bg-purple-600 text-white px-4 py-2 rounded" 
+              id="closeDialogBtn2">
+        Close
+      </button>
     </div>
   `;
+  
+  // FIXED: Add event listeners after DOM creation
+  document.getElementById('backToModelBtn').addEventListener('click', () => {
+    showLocationModelBreakdown(loc, inventory);
+  });
+  
+  document.getElementById('closeDialogBtn2').addEventListener('click', () => {
+    dialog.close();
+  });
+  
   dialog.showModal();
 }
   
@@ -878,7 +1059,7 @@ document.addEventListener('DOMContentLoaded', () => {
       
       await renderStatCards(stats, inventory);
       renderShipmentCountdown(stats.nextShipment);
-      renderAgingAlerts(stats, inventory);
+      await renderAgingAlerts(stats, inventory);
       
       // FIXED: Store original data for reset functionality
       renderStatusDonut(stats.byStatus);
@@ -887,7 +1068,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       
       renderLostMeter(stats, inventory);
-      await renderLocationBar(getLocationCounts(inventory), inventory);
+      await renderLocationStackedBar(getLocationCounts(inventory), inventory);
       
       // Add refresh functionality
       document.getElementById('refreshDashboard').addEventListener('click', async () => {
@@ -917,10 +1098,10 @@ async function refreshDashboard() {
     
     await renderStatCards(stats, inventory);
     renderShipmentCountdown(stats.nextShipment);
-    renderAgingAlerts(stats, inventory);
+    await renderAgingAlerts(stats, inventory);
     renderStatusDonut(stats.byStatus);
     renderLostMeter(stats, inventory);
-    await renderLocationBar(getLocationCounts(inventory), inventory);
+    await renderLocationStackedBar(getLocationCounts(inventory), inventory);
     
     document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
     showToast('Dashboard refreshed successfully', 'green');
