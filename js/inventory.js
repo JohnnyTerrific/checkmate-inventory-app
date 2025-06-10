@@ -312,6 +312,9 @@ window.openBulkAddDialog = async function() {
           .map(s => `<option value="${s}" ${s === 'In Stock' ? 'selected' : ''}>${s}</option>`).join("")}
         </select>
       </label>
+      <label>Default Comment (optional):
+        <textarea id="bulkComment" rows="2" class="border px-2 py-1 rounded w-full" placeholder="Optional comment for all items"></textarea>
+      </label>
       <textarea id="bulkText" rows="7" class="border px-2 py-1 rounded w-full" placeholder="Paste here"></textarea>
       <div class="flex justify-between gap-2 mt-3">
         <button type="button" value="cancel" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
@@ -333,6 +336,7 @@ dialog.querySelector('form').onsubmit = async e => {
   const rows = dialog.querySelector("#bulkText").value.trim().split("\n");
   const defaultLocation = dialog.querySelector("#bulkLocation").value;
   const defaultStatus = dialog.querySelector("#bulkStatus").value;
+  const defaultComment = dialog.querySelector("#bulkComment").value.trim();
 
   dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
 
@@ -357,7 +361,7 @@ dialog.querySelector('form').onsubmit = async e => {
       created: new Date().toISOString(),
       addedBy: getCurrentUserEmail(),
       lastAction: new Date().toISOString(),
-      notes: ""
+      notes: defaultComment
     });
     added++;
   }
@@ -668,22 +672,25 @@ function renderInventoryTable(main) {
       <button id="downloadExcel" class="bg-gray-200 px-3 py-1 rounded">Download Excel</button>
     </div>
     <div class="inventory-scroll-area min-h-[340px] overflow-x-auto" style="max-height:70vh;">
-      <table class="min-w-full table-auto border rounded-xl bg-white dark:bg-gray-900 shadow">
-        <thead class="table-header">
-          <tr>
-            <th class="p-2 border-b"><input type="checkbox" id="selectAll"></th>
-            <th class="p-2 border-b">Model</th>
-            <th class="p-2 border-b">Charger ID</th>
-            <th class="p-2 border-b">Serial</th>
-            <th class="p-2 border-b">SIM Number</th>
-            <th class="p-2 border-b">Status</th>
-            <th class="p-2 border-b">Location</th>
-            <th class="p-2 border-b">Last Action</th>
-            <th class="p-2 border-b">Actions</th>
-          </tr>
-        </thead>
-        <tbody id="inventoryTableBody"></tbody>
-      </table>
+      <div class="min-w-max">
+        <table class="w-full table-auto border rounded-xl bg-white dark:bg-gray-900 shadow" style="min-width: 1200px;">
+          <thead class="table-header">
+            <tr>
+              <th class="p-2 border-b w-12 resize-x overflow-hidden"><input type="checkbox" id="selectAll"></th>
+              <th class="p-2 border-b min-w-32 resize-x overflow-hidden">Model</th>
+              <th class="p-2 border-b min-w-32 resize-x overflow-hidden">Charger ID</th>
+              <th class="p-2 border-b min-w-24 resize-x overflow-hidden">Serial</th>
+              <th class="p-2 border-b min-w-28 resize-x overflow-hidden">SIM Number</th>
+              <th class="p-2 border-b min-w-20 resize-x overflow-hidden">Status</th>
+              <th class="p-2 border-b min-w-24 resize-x overflow-hidden">Location</th>
+              <th class="p-2 border-b min-w-32 resize-x overflow-hidden">Comment</th>
+              <th class="p-2 border-b min-w-32 resize-x overflow-hidden">Last Action</th>
+              <th class="p-2 border-b w-20">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="inventoryTableBody"></tbody>
+        </table>
+      </div>
     </div>
     <div id="bulkActionBar"></div>
     <div id="paginationBar"></div>
@@ -818,9 +825,9 @@ const location = filterLocation.value;
             "
           >${unit.location}</span>
         </td>
+        <td class="p-2 border-b table-cell text-xs text-gray-600 max-w-32 truncate" title="${unit.notes || ''}">${unit.notes || '-'}</td>
         <td class="p-2 border-b table-cell">${new Date(unit.lastAction).toLocaleString()}</td>
-        <td class="p-2 border-b table-cell">
-        <div class="table-dot-menu" data-idx="${idx}">
+        <td class="p-2 border-b text-center relative table-dot-menu">
           <button class="px-2 py-1 text-lg font-bold" onclick="event.stopPropagation();toggleRowMenu(${idx})">⋮</button>
           <div class="table-dot-menu-content" id="row-menu-${idx}">
             <button onclick='openDetailsDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})'>Details</button>
@@ -829,6 +836,7 @@ const location = filterLocation.value;
             <button onclick='openEditDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})'>Edit</button>
             ${canDelete ? `<button class="delete" onclick='deleteUnit("${unit.chargerId}")'>Delete</button>` : ""}
           </div>
+        </td>
         </div>
       </td>
     </tr>
@@ -1080,6 +1088,7 @@ if (selectAll) {
           <div class="font-bold text-base text-gray-900 dark:text-white truncate">${unit.chargerId}</div>
           <div class="text-xs text-gray-600 dark:text-gray-300">${unit.status} • ${unit.location}</div>
           <div class="text-xs text-gray-400 truncate">${unit.model || unit.product || ""}${unit.chargerSerial ? " • " + unit.chargerSerial : ""}</div>
+          ${unit.notes ? `<div class="text-xs text-blue-600 dark:text-blue-400 truncate italic">"${unit.notes}"</div>` : ''}
         </div>
         <button class="ml-2 text-gray-400 hover:text-purple-600 transition-all" onclick='window.openDetailsDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})' title="View Details">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -1905,41 +1914,26 @@ window.toggleActionsMenu = function(idx) {
     const statusOptions = (await loadSettings()).statuses;
   
     dialog.innerHTML = `
-      <form method="dialog" class="flex flex-col gap-3 w-80">
-        <h3 class="font-bold mb-2">Edit Unit ${unit.chargerId}</h3>
-        <div class="text-red-600 text-xs min-h-[1em]" id="formError"></div>
-        <input id="editChargerId" type="text" class="border px-2 py-1 rounded" value="${unit.chargerId}" disabled>
-        <input id="editChargerSerial" type="text" class="border px-2 py-1 rounded" value="${unit.chargerSerial || ''}" placeholder="Serial (optional)">
-        <input id="editSimNumber" type="text" class="border px-2 py-1 rounded" value="${unit.simNumber || ''}" placeholder="SIM Number (optional)">
-        <input id="editProduct" type="text" class="border px-2 py-1 rounded" value="${unit.product || ''}" placeholder="Product">
-        <input id="editModel" type="text" class="border px-2 py-1 rounded" value="${unit.model || ''}" placeholder="Model">
-        <select id="editLocation" required class="border px-2 py-1 rounded">
-  ${(() => {
-    const currentLocation = unit.location;
-    
-    // Always include current location first as selected
-    let options = `<option value="${currentLocation}" selected>${currentLocation}</option>`;
-    
-    // Add all other locations except current
-    const otherLocations = locations.filter(l => l.name !== currentLocation);
-    options += otherLocations.map(l =>
-      `<option value="${l.name}">${l.name}${l.parent ? ` (${l.parent})` : ""}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
-    ).join("");
-    
-    return options;
-  })()}
-</select>
-        <select id="editStatus" required class="border px-2 py-1 rounded">
-          <option value="">-- Select Status --</option>
-          ${(statusOptions || []).map(s => `<option value="${s}"${unit.status === s ? " selected" : ""}>${s}</option>`).join("")}
-        </select>
-        <textarea id="editNotes" class="border px-2 py-1 rounded" placeholder="Notes (optional)">${unit.notes || ''}</textarea>
-        <div class="flex justify-between gap-2 mt-3">
-          <button type="button" value="cancel" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
-          <button value="ok" class="bg-purple-600 text-white px-3 py-1 rounded">Save</button>
-        </div>
-      </form>
-    `;
+    <form method="dialog" class="flex flex-col gap-3 w-80">
+      <h3 class="font-bold mb-2">Edit Unit ${unit.chargerId}</h3>
+      <div class="text-red-600 text-xs min-h-[1em]" id="formError"></div>
+      <input id="editChargerId" type="text" class="border px-2 py-1 rounded" value="${unit.chargerId}" disabled>
+      <input id="editChargerSerial" type="text" class="border px-2 py-1 rounded" value="${unit.chargerSerial || ''}" placeholder="Serial (optional)">
+      <input id="editSimNumber" type="text" class="border px-2 py-1 rounded" value="${unit.simNumber || ''}" placeholder="SIM Number (optional)">
+      <input id="editProduct" type="text" class="border px-2 py-1 rounded" value="${unit.product || ''}" placeholder="Product">
+      <input id="editModel" type="text" class="border px-2 py-1 rounded" value="${unit.model || ''}" placeholder="Model">
+      <input id="editLocation" type="text" class="border px-2 py-1 rounded bg-gray-100" value="${unit.location}" readonly>
+      <select id="editStatus" required class="border px-2 py-1 rounded">
+        <option value="">-- Select Status --</option>
+        ${(statusOptions || []).map(s => `<option value="${s}"${unit.status === s ? " selected" : ""}>${s}</option>`).join("")}
+      </select>
+      <textarea id="editNotes" class="border px-2 py-1 rounded" placeholder="Notes (optional)">${unit.notes || ''}</textarea>
+      <div class="flex justify-between gap-2 mt-3">
+        <button type="button" value="cancel" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
+        <button value="ok" class="bg-purple-600 text-white px-3 py-1 rounded">Save</button>
+      </div>
+    </form>
+  `;
   
     dialog.showModal();
     
@@ -1959,7 +1953,7 @@ window.toggleActionsMenu = function(idx) {
       const simNumber = dialog.querySelector("#editSimNumber").value.trim();
       const product = dialog.querySelector("#editProduct").value.trim();
       const model = dialog.querySelector("#editModel").value.trim();
-      const location = dialog.querySelector("#editLocation").value.trim() || unit.location;
+      const location = unit.location;
       const status = dialog.querySelector("#editStatus").value.trim() || unit.status;
       const notes = dialog.querySelector("#editNotes").value.trim();
     
