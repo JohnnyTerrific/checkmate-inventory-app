@@ -1004,6 +1004,8 @@ if (selectAll) {
         });
       }
     };
+
+    attachMobileSwipeHandlers(list);
   
     // FAB add logic
     main.querySelector('#fabAdd').onclick = () => {
