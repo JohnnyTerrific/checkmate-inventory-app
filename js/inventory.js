@@ -10,6 +10,7 @@ import { db } from './utils/firebase.js';
 import { collection, getDocs, doc, setDoc, deleteDoc, writeBatch, orderBy, query, onSnapshot } from "firebase/firestore";
 window.isInitialLoad = true;
 
+let inventoryUnsubscribe = null;
 let currentLayoutMode = window.innerWidth < 900 ? 'mobile' : 'desktop';
 
 function shouldUseMobileLayout() {
@@ -94,7 +95,15 @@ export async function saveInventory(list) {
 }
 
 export async function updateSingleItem(item) {
+  // Add validation
   try {
+    validateInventoryItem(item);
+  } catch (error) {
+    showToast(error.message, 'red');
+    throw error;
+  }
+
+  return safeFirebaseOperation(async () => {
     await setDoc(doc(db, "inventory", item.chargerId), {
       chargerSerial: item.chargerSerial || "",
       simNumber: item.simNumber || "",
@@ -119,24 +128,82 @@ export async function updateSingleItem(item) {
     } else {
       window.inventory.push(item);
     }
+  }, 'item update');
+}
+
+function listenToInventoryUpdates() {
+  if (inventoryUnsubscribe) {
+    inventoryUnsubscribe();
+  }
+  
+  const colRef = collection(db, "inventory");
+  inventoryUnsubscribe = onSnapshot(colRef, 
+    debounce((snapshot) => {
+      try {
+        window.inventory = snapshot.docs.map(doc => ({ chargerId: doc.id, ...doc.data() }));
+        if (document.body.dataset.page === "inventory" && 
+            document.getElementById('main-content') && 
+            !window.isInitialLoad) {
+          renderTableRows();
+        }
+      } catch (error) {
+        console.error('Real-time update failed:', error);
+        showToast('Connection issue - please refresh', 'yellow');
+      }
+    }, 500),
+    (error) => {
+      console.error('Firestore listener error:', error);
+      showToast('Database connection lost - please refresh', 'red');
+    }
+  );
+}
+
+// Add cache cleanup when leaving page:
+window.addEventListener('beforeunload', () => {
+  if (inventoryUnsubscribe) {
+    inventoryUnsubscribe();
+  }
+  // Clear search cache
+  window._globalSearchCache = null;
+});
+
+async function safeFirebaseOperation(operation, operationName) {
+  try {
+    return await operation();
   } catch (error) {
-    console.error("Error updating item:", error);
-    showToast("Error updating item: " + error.message, "red");
+    console.error(`Firebase ${operationName} failed:`, error);
+    showToast(`Database error: ${operationName} failed. Please try again.`, 'red');
     throw error;
   }
 }
 
-function listenToInventoryUpdates() {
-  const colRef = collection(db, "inventory");
-  onSnapshot(colRef, (snapshot) => {
-    window.inventory = snapshot.docs.map(doc => ({ chargerId: doc.id, ...doc.data() }));
-    // Only re-render if we're on inventory page and not during initial load
-    if (document.body.dataset.page === "inventory" && 
-        document.getElementById('main-content') && 
-        !window.isInitialLoad) {
-      setTimeout(() => renderTableRows(), 100); // Use renderTableRows, not full table
-    }
-  });
+function validateInventoryItem(item) {
+  const required = ['chargerId', 'location', 'status'];
+  const missing = required.filter(field => !item[field] || item[field].trim() === '');
+  
+  if (missing.length > 0) {
+    throw new Error(`Missing required fields: ${missing.join(', ')}`);
+  }
+  
+  if (item.chargerId.length > 50) {
+    throw new Error('Charger ID too long (max 50 characters)');
+  }
+  
+  return true;
+}
+
+function debounceSubmit(element, delay = 2000) {
+  if (element.dataset.submitting === 'true') {
+    showToast('Please wait, processing...', 'yellow');
+    return false;
+  }
+  
+  element.dataset.submitting = 'true';
+  setTimeout(() => {
+    element.dataset.submitting = 'false';
+  }, delay);
+  
+  return true;
 }
 
 // 3) Load entire audit log from Firestore
@@ -148,31 +215,44 @@ export async function loadAuditLog() {
 }
 
 // 4) Save (append) an array of audit entries into Firestore
+// Replace the saveAuditLog function around line 220:
 export async function saveAuditLog(newEntries) {
-  const batch = writeBatch(db);
-  const colRef = collection(db, "auditLog");
+  if (!newEntries || newEntries.length === 0) {
+    console.warn('No audit entries to save');
+    return;
+  }
 
-  newEntries.forEach(entry => {
-    const docRef = doc(colRef);
-    batch.set(docRef, {
-      date: entry.date,
-      action: entry.action,
-      chargerId: entry.chargerId,
-      chargerSerial: entry.chargerSerial || "",
-      simNumber: entry.simNumber || "",
-      product: entry.product || "",
-      from: entry.from || "",
-      to: entry.to || "",
-      statusFrom: entry.statusFrom || "",
-      statusTo: entry.statusTo || "",
-      user: entry.user || getCurrentUserEmail(),
-      comment: entry.comment || "",
-      contractorId: entry.contractorId || "",
-      contractorName: entry.contractorName || ""
+  try {
+    const batch = writeBatch(db);
+    const colRef = collection(db, "auditLog");
+
+    newEntries.forEach(entry => {
+      const docRef = doc(colRef);
+      batch.set(docRef, {
+        date: entry.date || new Date().toISOString(),
+        action: entry.action || "Unknown Action",
+        chargerId: entry.chargerId || "",
+        chargerSerial: entry.chargerSerial || "",
+        simNumber: entry.simNumber || "",
+        product: entry.product || "",
+        from: entry.from || "",
+        to: entry.to || "",
+        statusFrom: entry.statusFrom || "",
+        statusTo: entry.statusTo || "",
+        user: entry.user || getCurrentUserEmail(),
+        comment: entry.comment || "",
+        contractorId: entry.contractorId || "",
+        contractorName: entry.contractorName || ""
+      });
     });
-  });
 
-  await batch.commit();
+    await batch.commit();
+    console.log(`Successfully saved ${newEntries.length} audit log entries`);
+  } catch (error) {
+    console.error('Failed to save audit log:', error);
+    showToast('Warning: Action completed but audit log failed to save', 'yellow');
+    // Don't throw - let the main action succeed even if audit fails
+  }
 }
 
 window.selectedUnits = [];
@@ -336,7 +416,10 @@ window.openBulkAddDialog = async function() {
   
   dialog.querySelector('form').onsubmit = async e => {
     e.preventDefault();
-    // Read values BEFORE replacing innerHTML
+
+    const submitBtn = e.target.querySelector('button[value="ok"]');
+    if (!debounceSubmit(submitBtn)) return;
+
     const rows = dialog.querySelector("#bulkText").value.trim().split("\n");
     const defaultLocation = dialog.querySelector("#bulkLocation").value;
     const defaultStatus = dialog.querySelector("#bulkStatus").value;
@@ -349,11 +432,11 @@ window.openBulkAddDialog = async function() {
     let existingIds = new Set(items.map(i => i.chargerId));
   
     for (let row of rows) {
-      // Accept tab-separated OR comma-separated, allow up to 5 columns
       let [model, chargerId, chargerSerial, simNumber, comment] = row.split(/\t|,/).map(v => v?.trim());
       if (!chargerId || existingIds.has(chargerId)) continue;
       existingIds.add(chargerId);
-      items.push({
+      
+      const newItem = {
         chargerId,
         chargerSerial: chargerSerial || "",
         simNumber: simNumber || "",
@@ -365,18 +448,54 @@ window.openBulkAddDialog = async function() {
         created: new Date().toISOString(),
         addedBy: getCurrentUserEmail(),
         lastAction: new Date().toISOString(),
-        notes: comment || defaultComment // Use row comment if present, else default
-      });
-      added++;
+        notes: comment || defaultComment
+      };
+      
+      // ADD VALIDATION HERE:
+      try {
+        validateInventoryItem(newItem);
+        items.push(newItem);
+        added++;
+      } catch (error) {
+        console.warn(`Skipping invalid item ${chargerId}:`, error.message);
+        showToast(`Skipped invalid item ${chargerId}: ${error.message}`, 'yellow');
+      }
     }
-    for (const item of items.slice(window.inventory.length)) {
-      await updateSingleItem(item);
-    }
-    showToast(`Bulk added ${added} units`, "green");
-    dialog.close();
-    window.inventory = items;
-    renderInventoryTable(document.getElementById('main-content'));
-  };
+  
+  // Replace lines 450-457 with:
+for (const item of items.slice(window.inventory.length)) {
+  await updateSingleItem(item);
+}
+
+// Create audit log entries for bulk add
+const newEntries = items.slice(window.inventory.length).map(item => ({
+  date: new Date().toISOString(),
+  action: "Bulk Add",
+  chargerId: item.chargerId,
+  chargerSerial: item.chargerSerial,
+  simNumber: item.simNumber,
+  product: item.product,
+  from: "",
+  to: item.location,
+  statusFrom: "",
+  statusTo: item.status,
+  user: getCurrentUserEmail(),
+  comment: item.notes
+}));
+
+try {
+  await saveAuditLog(newEntries);
+  console.log('Bulk add audit entries saved:', newEntries.length);
+} catch (error) {
+  console.error('Failed to save bulk add audit log:', error);
+  showToast('Warning: Items added but audit log failed', 'yellow');
+}
+
+showToast(`Bulk added ${added} units`, "green");
+dialog.close();
+window.inventory = items;
+renderInventoryTable(document.getElementById('main-content'));
+};
   }; 
 
   window.bulkDelete = async function() {
@@ -811,30 +930,27 @@ function setupMultiSelectFilter(type, allValues, label) {
     // Select all checkbox
     selectAll.onchange = (e) => {
       const checkboxList = checkboxes.querySelectorAll(`.${type}-checkbox`);
+      const propertyName = type === 'status' ? 'selectedStatuses' : 'selectedLocations';
+      
       if (e.target.checked) {
         checkboxList.forEach(cb => {
           cb.checked = true;
-          // FIX: Use the correct property name
-          const propertyName = type === 'status' ? 'selectedStatuses' : 'selectedLocations';
           window.inventoryFilters[propertyName].add(cb.value);
         });
       } else {
         checkboxList.forEach(cb => {
           cb.checked = false;
-          // FIX: Use the correct property name
-          const propertyName = type === 'status' ? 'selectedStatuses' : 'selectedLocations';
           window.inventoryFilters[propertyName].delete(cb.value);
         });
       }
-    updateFilterUI();
-    window.inventoryPage = 1;
-    renderTableRows();
-  };
+      updateFilterUI();
+      window.inventoryPage = 1;
+      renderTableRows();
+    };
 
    // Individual checkboxes
    checkboxes.addEventListener('change', (e) => {
     if (e.target.classList.contains(`${type}-checkbox`)) {
-      // FIX: Use the correct property name
       const propertyName = type === 'status' ? 'selectedStatuses' : 'selectedLocations';
       
       if (e.target.checked) {
@@ -1145,14 +1261,14 @@ if (selectAll) {
   
     // Fix search functionality for mobile
     const searchInput = main.querySelector('#searchInput');
-    searchInput.oninput = debounce((e) => {
-      const q = e.target.value.toLowerCase();
-      const filtered = window.inventory.filter(i =>
-        [i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status, i.location, i.notes]
-          .some(f => (f || '').toLowerCase().includes(q))
-      );
-      renderMobileInventoryList(list, filtered);
-    }, 250);
+searchInput.oninput = debounce((e) => {
+  const q = e.target.value.toLowerCase();
+  const filtered = window.inventory.filter(i =>
+    [i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status, i.location, i.notes]
+      .some(f => (f || '').toLowerCase().includes(q))
+  );
+  renderMobileInventoryList(list, filtered);
+}, 250);
   
     // Fix scan button logic
     main.querySelector('#scanBtn').onclick = () => {
@@ -1454,6 +1570,10 @@ if (selectAll) {
   
     dialog.querySelector('form').onsubmit = async e => {
       e.preventDefault();
+
+      const submitBtn = e.target.querySelector('button[value="ok"]');
+      if (!debounceSubmit(submitBtn)) return;
+
       const moveLoc = dialog.querySelector("#moveLoc").value.trim();
       const moveStatus = dialog.querySelector("#moveStatus").value.trim();
       const moveComment = dialog.querySelector("#moveComment").value.trim();
@@ -1501,30 +1621,43 @@ if (selectAll) {
       });
       
       // Update all items at once
-      for (const unit of selected) {
-        const idx = items.findIndex(i => i.chargerId === unit.chargerId);
-        if (idx >= 0) {
-          await updateSingleItem(items[idx]);
-        }
+      try {
+        // Update all items at once
+        const updatePromises = selected.map(unit => {
+          const idx = items.findIndex(i => i.chargerId === unit.chargerId);
+          if (idx >= 0) {
+            return updateSingleItem(items[idx]);
+          }
+        });
+        
+        await Promise.all(updatePromises.filter(Boolean));
+        
+        // Create audit log entries
+        const newEntries = selected.map(unit => ({
+          date: new Date().toISOString(),
+          action: "Bulk Move",
+          chargerId: unit.chargerId,
+          chargerSerial: unit.chargerSerial || "",
+          simNumber: unit.simNumber || "",
+          product: unit.product || "",
+          from: unit.location,
+          to: moveLoc,
+          statusFrom: unit.status,
+          statusTo: moveStatus || unit.status,
+          user: getCurrentUserEmail(),
+          comment: moveComment
+        }));
+        
+        await saveAuditLog(newEntries);
+        console.log('Audit entries saved:', newEntries.length);
+        
+      } catch (error) {
+        console.error('Bulk move failed:', error);
+        showToast('Bulk move failed: ' + error.message, 'red');
+        dialog.close();
+        return;
       }
-    
-      // Create audit log entries
-      const newEntries = selected.map(unit => ({
-        date: new Date().toISOString(),
-        action: "Bulk Move",
-        chargerId: unit.chargerId,
-        chargerSerial: unit.chargerSerial,
-        simNumber: unit.simNumber,
-        product: unit.product,
-        from: unit.location,
-        to: moveLoc || unit.location,
-        statusFrom: unit.status,
-        statusTo: moveStatus || unit.status,
-        user: getCurrentUserEmail(),
-        comment: moveComment
-      }));
-      await saveAuditLog(newEntries);
-    
+
       showUndoToast("Units moved", "blue", async () => {
         for (const prevState of prevStates) {
           await updateSingleItem(prevState);
@@ -1617,6 +1750,9 @@ if (selectAll) {
     dialog.querySelector('form').onsubmit = async e => {
       e.preventDefault();
     
+      const submitBtn = e.target.querySelector('button[value="ok"]');
+      if (!debounceSubmit(submitBtn)) return;
+
       // Read all form values BEFORE replacing dialog content
       const newStatus = dialog.querySelector("#newStatus").value.trim();
       const statusComment = dialog.querySelector("#statusComment").value.trim();
@@ -1624,17 +1760,16 @@ if (selectAll) {
       const invoice = dialog.querySelector("#invoiceNumber") ? dialog.querySelector("#invoiceNumber").value.trim() : "";
     
       if (!newStatus) {
-        dialog.querySelector("#newStatus").classList.add('border-red-500');
-        dialog.querySelector("#formError").textContent = "Please select a status.";
-        return;
-      }
-    
-      // Validate if Installed status requires Private/Public selection
-      if (newStatus === "Installed" && !privPub) {
-        dialog.querySelector("#privatePublic").classList.add('border-red-500');
-        dialog.querySelector("#formError").textContent = "Please select Private or Public for installed status.";
-        return;
-      }
+      dialog.querySelector("#newStatus").classList.add('border-red-500');
+      dialog.querySelector("#formError").textContent = "Please select a status.";
+      return;
+    }
+
+    if (newStatus === "Installed" && !privPub) {
+    if (privPubEl) privPubEl.classList.add('border-red-500');
+    dialog.querySelector("#formError").textContent = "Please select Private or Public for installed status.";
+    return;
+    }
     
       // NOW replace dialog content with loading spinner
       dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
@@ -1679,8 +1814,15 @@ if (selectAll) {
         user: getCurrentUserEmail(),
         comment: statusComment
       }));
-      await saveAuditLog(newEntries);
-    
+      
+      try {
+        await saveAuditLog(newEntries);
+        console.log('Bulk status change audit entries saved:', newEntries.length);
+      } catch (error) {
+        console.error('Failed to save bulk status audit log:', error);
+        showToast('Warning: Status changed but audit log failed', 'yellow');
+      }
+
       // Undo support
       showUndoToast("Status changed", "blue", async () => {
         for (const prevState of prevStates) {
@@ -1907,6 +2049,10 @@ window.toggleActionsMenu = function(idx) {
   
     dialog.querySelector('form').onsubmit = async e => {
       e.preventDefault();
+
+      const submitBtn = e.target.querySelector('button[value="ok"]');
+      if (!debounceSubmit(submitBtn)) return;
+
       const moveLoc = dialog.querySelector("#moveLoc").value.trim();
       const moveStatus = dialog.querySelector("#moveStatus").value.trim();
       const moveComment = dialog.querySelector("#moveComment").value.trim();
@@ -2028,30 +2174,40 @@ window.toggleActionsMenu = function(idx) {
     };
 
     dialog.querySelector('form').onsubmit = async e => {
-  e.preventDefault();
-  const contractorId = dialog.querySelector('#contractor').value.trim();
-  const assignComment = dialog.querySelector('#assignComment').value.trim();
-  if (!contractorId) {
-    dialog.querySelector('#formError').textContent = 'Select a contractor.';
-    return;
-  }
-  const contractor = contractors.find(c => c.id === contractorId);
-  if (!contractor) {
-    dialog.querySelector('#formError').textContent = 'Contractor not found.';
-    return;
-  }
-
-  dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
-
-  let items = [...window.inventory];
-  const idx = items.findIndex(i => i.chargerId === unit.chargerId);
-  if (idx >= 0) {
-    items[idx].location = contractor.name;
-    items[idx].contractorId = contractor.id;
-    items[idx].status = 'Reserved';
-    items[idx].lastAction = new Date().toISOString();
-  }
-  await updateSingleItem(items[idx]);
+      e.preventDefault();
+    
+      const submitBtn = e.target.querySelector('button[value="ok"]');
+      if (!debounceSubmit(submitBtn)) return;
+    
+      const contractorId = dialog.querySelector("#contractor").value;
+      const assignComment = dialog.querySelector("#assignComment").value.trim();
+    
+      if (!contractorId) {
+        dialog.querySelector("#contractor").classList.add('border-red-500');
+        dialog.querySelector("#formError").textContent = "Please select a contractor.";
+        return;
+      }
+    
+      const contractors = (await loadSettings()).contractors || [];
+      const contractor = contractors.find(c => c.id === contractorId);
+      
+      if (!contractor) {
+        dialog.querySelector("#formError").textContent = "Selected contractor not found.";
+        return;
+      }
+    
+      dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
+    
+      let items = [...window.inventory];
+      const idx = items.findIndex(i => i.chargerId === unit.chargerId);
+      if (idx >= 0) {
+        items[idx].location = contractor.name;
+        items[idx].contractorId = contractor.id;
+        items[idx].status = 'Reserved';
+        items[idx].lastAction = new Date().toISOString();
+        if (assignComment) items[idx].notes = assignComment;
+      }
+      await updateSingleItem(items[idx]);
 
   await saveAuditLog([{
     date: new Date().toISOString(),
@@ -2123,6 +2279,9 @@ window.toggleActionsMenu = function(idx) {
   
     dialog.querySelector('form').onsubmit = async e => {
       e.preventDefault();
+
+      const submitBtn = e.target.querySelector('button[value="ok"]');
+      if (!debounceSubmit(submitBtn)) return;
     
       const chargerSerial = dialog.querySelector("#editChargerSerial").value.trim();
       const simNumber = dialog.querySelector("#editSimNumber").value.trim();
@@ -2231,26 +2390,26 @@ window.performGlobalSearch = async function(query, forceReload = false) {
   const resultsDiv = document.getElementById('globalSearchResults');
   if (!resultsDiv) return;
 
-  let shipments, products, loadedInventory;
-  if (!window.inventory.length || forceReload) {
-    [shipments, loadedInventory, products] = await Promise.all([
-      loadShipments(),
-      loadInventory(),
-      loadProducts()
-    ]);
-    window.inventory = loadedInventory;
-  } else {
-    [shipments, products] = await Promise.all([
-      loadShipments(),
-      loadProducts()
-    ]);
-    loadedInventory = window.inventory;
+  // Cache data at window level with expiration
+  const cacheAge = window._globalSearchCache?.timestamp ? 
+    Date.now() - window._globalSearchCache.timestamp : Infinity;
+  
+  if (!window._globalSearchCache || forceReload || cacheAge > 300000) { // 5 minutes
+    window._globalSearchCache = {
+      shipments: await loadShipments(),
+      products: await loadProducts(),
+      inventory: window.inventory.length ? window.inventory : await loadInventory(),
+      timestamp: Date.now()
+    };
   }
+
+  const { shipments, products, inventory } = window._globalSearchCache;
 
   if (!query) {
     resultsDiv.innerHTML = `<div class="text-gray-400 text-center py-6">Start typing to search...</div>`;
     return;
   }
+
   const q = query.toLowerCase();
 
   const shipmentMatches = shipments.filter(s =>
@@ -2259,7 +2418,7 @@ window.performGlobalSearch = async function(query, forceReload = false) {
     (s.incoterm || '').toLowerCase().includes(q) ||
     (Array.isArray(s.products) && s.products.some(p => (p.model || '').toLowerCase().includes(q)))
   );
-  const inventoryMatches = loadedInventory.filter(i => {
+  const inventoryMatches = inventory.filter(i => {
     const allFields = [
       i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status,
       i.location, i.notes, i.lastAction, i.addedBy, i.invoiceNumber
@@ -2440,62 +2599,85 @@ if (scanBtn) {
     dialog.querySelector("#invoiceNumber").style.display = val === "Private" ? "" : "none";
   };
 
+  // Replace the broken form.onsubmit section around line 2540:
   dialog.querySelector('form').onsubmit = async e => {
     e.preventDefault();
-    if (document.activeElement.value === "cancel") {
-      dialog.close();
-      return;
-    }
-    // Validation
-    let valid = true;
-    dialog.querySelectorAll('input, select, textarea').forEach(el => el.classList.remove('border-red-500'));
-    dialog.querySelector("#formError").textContent = "";
-    const chargerId = dialog.querySelector("#chargerId").value.trim();
-    const chargerSerial = dialog.querySelector("#chargerSerial").value.trim();
-    const simNumber = dialog.querySelector("#simNumber").value.trim();
-    const product = dialog.querySelector("#product").value.trim();
-    const model = dialog.querySelector("#model").value.trim();
-    const location = dialog.querySelector("#location").value.trim();
-    const status = dialog.querySelector("#status").value.trim();
-    const notes = dialog.querySelector("#notes").value.trim();
-    const privPub = dialog.querySelector("#privatePublic") ? dialog.querySelector("#privatePublic").value : "";
-    const invoice = dialog.querySelector("#invoiceNumber") ? dialog.querySelector("#invoiceNumber").value.trim() : "";
-    if (!chargerId) { dialog.querySelector("#chargerId").classList.add('border-red-500'); valid = false; }
-    if (!product) { dialog.querySelector("#product").classList.add('border-red-500'); valid = false; }
-    if (!location) { dialog.querySelector("#location").classList.add('border-red-500'); valid = false; }
-    if (!status) { dialog.querySelector("#status").classList.add('border-red-500'); valid = false; }
-    if (status === "Installed" && !privPub) { dialog.querySelector("#privatePublic").classList.add('border-red-500'); valid = false; }
-    if (!valid) {
-      dialog.querySelector("#formError").textContent = "Please fill in all required fields.";
-      return;
-    }
-    // Construct item
-    const item = {
-      chargerId, chargerSerial, simNumber, product, model, location,
-      status,
-      assigned: status === "Installed",
-      created: new Date().toISOString(),
-      addedBy: getCurrentUserEmail(),
-      lastAction: new Date().toISOString(),
-      notes,
-      isAsset: (status === "Installed" && privPub === "Public"),
-      invoiceNumber: (status === "Installed" && privPub === "Private") ? invoice : ""
-    };
-    // Save
-    const items = [...window.inventory];
-if (items.some(i => i.chargerId === chargerId)) {
-  dialog.querySelector("#formError").textContent = "Charger ID already exists!";
-  dialog.querySelector("#chargerId").classList.add('border-red-500');
-  return;
-}
-items.push(item);
-await updateSingleItem(item);
-    showToast("Inventory item added", "green");
+  
+    const submitBtn = e.target.querySelector('button[value="ok"]');
+    if (!debounceSubmit(submitBtn)) return;
+
+  if (document.activeElement.value === "cancel") {
     dialog.close();
-    window.inventory = items;
-    renderInventoryTable(document.getElementById('main-content'));
+    return;
+  }
+
+  // Validation
+  let valid = true;
+  dialog.querySelectorAll('input, select, textarea').forEach(el => el.classList.remove('border-red-500'));
+  dialog.querySelector("#formError").textContent = "";
+
+  const chargerId = dialog.querySelector("#chargerId").value.trim();
+  const chargerSerial = dialog.querySelector("#chargerSerial").value.trim();
+  const simNumber = dialog.querySelector("#simNumber").value.trim();
+  const product = dialog.querySelector("#product").value.trim();
+  const model = dialog.querySelector("#model").value.trim();
+  const location = dialog.querySelector("#location").value.trim();
+  const status = dialog.querySelector("#status").value.trim();
+  const notes = dialog.querySelector("#notes").value.trim();
+  const privPub = dialog.querySelector("#privatePublic") ? dialog.querySelector("#privatePublic").value : "";
+  const invoice = dialog.querySelector("#invoiceNumber") ? dialog.querySelector("#invoiceNumber").value.trim() : "";
+
+  if (!chargerId) { dialog.querySelector("#chargerId").classList.add('border-red-500'); valid = false; }
+  if (!product) { dialog.querySelector("#product").classList.add('border-red-500'); valid = false; }
+  if (!location) { dialog.querySelector("#location").classList.add('border-red-500'); valid = false; }
+  if (!status) { dialog.querySelector("#status").classList.add('border-red-500'); valid = false; }
+  if (status === "Installed" && !privPub) { dialog.querySelector("#privatePublic").classList.add('border-red-500'); valid = false; }
+
+  if (!valid) {
+    dialog.querySelector("#formError").textContent = "Please fill in all required fields.";
+    return;
+  }
+  
+  // Construct item BEFORE checking for duplicates
+  const item = {
+    chargerId, chargerSerial, simNumber, product, model, location,
+    status,
+    assigned: status === "Installed",
+    created: new Date().toISOString(),
+    addedBy: getCurrentUserEmail(),
+    lastAction: new Date().toISOString(),
+    notes,
+    isAsset: (status === "Installed" && privPub === "Public"),
+    invoiceNumber: (status === "Installed" && privPub === "Private") ? invoice : ""
   };
+  
+  // Check for duplicates
+  const items = [...window.inventory];
+  if (items.some(i => i.chargerId === chargerId)) {
+    dialog.querySelector("#formError").textContent = "Charger ID already exists!";
+    dialog.querySelector("#chargerId").classList.add('border-red-500');
+    return;
+  }
+  
+  // Validate the item
+  try {
+    validateInventoryItem(item);
+  } catch (error) {
+    dialog.querySelector("#formError").textContent = error.message;
+    return;
+  }
+  
+  dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
+  
+  items.push(item);
+  await updateSingleItem(item);
+  showToast("Inventory item added", "green");
+  dialog.close();
+  window.inventory = items;
+  renderInventoryTable(document.getElementById('main-content'));
+};
 }
+
 window.openStatusDialog = async function(unit) {
   if (!(await canManageInventory())) {
     showToast("You don't have permission to manage inventory", "red");
@@ -2565,20 +2747,32 @@ window.openStatusDialog = async function(unit) {
 
   dialog.querySelector('form').onsubmit = async e => {
     e.preventDefault();
+  
+    const submitBtn = e.target.querySelector('button[value="ok"]');
+    if (!debounceSubmit(submitBtn)) return;
+  
     const newStatus = dialog.querySelector("#newStatus").value.trim();
     const privPubEl = dialog.querySelector("#privatePublic");
     const privPub = privPubEl ? privPubEl.value : "";
     const invoiceEl = dialog.querySelector("#invoiceNumber");
     const invoice = invoiceEl ? invoiceEl.value.trim() : "";
     const statusComment = dialog.querySelector("#statusComment").value.trim();
-
-    let valid = !!newStatus;
+  
+    // Clear previous errors
+    dialog.querySelectorAll('input, select, textarea').forEach(el => el.classList.remove('border-red-500'));
     dialog.querySelector("#formError").textContent = "";
-    if (newStatus === "Installed") {
-      if (!privPubEl || !privPub) {
-        if (privPubEl) privPubEl.classList.add('border-red-500');
-        valid = false;
-      }
+  
+    // Validate required fields
+    if (!newStatus) {
+      dialog.querySelector("#newStatus").classList.add('border-red-500');
+      dialog.querySelector("#formError").textContent = "Please select a status.";
+      return;
+    }
+  
+    if (newStatus === "Installed" && privPubEl && !privPub) {
+      privPubEl.classList.add('border-red-500');
+      dialog.querySelector("#formError").textContent = "Please select Private or Public for installed status.";
+      return;
     }
 
     dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
@@ -2637,12 +2831,6 @@ window.openBarcodeScanner = function(onDetected) {
   `;
   scanDialog.showModal();
 
-  scanDialog.addEventListener('click', function(e) {
-    if (e.target === scanDialog) {
-      cancelScanHandler();
-    }
-  });
-
   let scanned = false;
 
   function cleanup() {
@@ -2689,8 +2877,12 @@ window.openBarcodeScanner = function(onDetected) {
       decoder: { readers: ["code_128_reader", "ean_reader", "ean_8_reader"] }
     }, function(err) {
       if (err) {
-        document.getElementById('barcode-feedback').textContent = "Camera error: " + err;
-        setTimeout(closeScanner, 1500);
+        console.error('Camera initialization failed:', err);
+        document.getElementById('barcode-feedback').textContent = "Camera error: " + err.message;
+        setTimeout(() => {
+          closeScanner();
+          if (onDetected) onDetected(null); // Notify caller that scan failed
+        }, 1500);
         return;
       }
       Quagga.start();
@@ -2703,10 +2895,10 @@ window.openBarcodeScanner = function(onDetected) {
       if (scanned) return;
       const code = data.codeResult.code || "";
       const numeric = (code.match(/(\d{8})$/) || [])[1] || code;
-
+    
       lastResults.push(numeric);
       if (lastResults.length > requiredStableReads) lastResults.shift();
-
+    
       if (
         lastResults.length === requiredStableReads &&
         lastResults.every(val => val === lastResults[0])
@@ -2766,13 +2958,31 @@ window.downloadInventoryCSV = function() {
   try {
     const items = [...window.inventory];
     const header = ["Charger ID", "Serial", "Status", "Location", "Last Action"];
-    const rows = items.map(i => [i.chargerId, i.chargerSerial || '', i.status, i.location, i.lastAction]);
-    let csv = header.join(",") + "\n" + rows.map(r => r.join(",")).join("\n");
+    
+    // Sanitize data to prevent CSV injection
+    const sanitizeCell = (value) => {
+      if (!value) return '';
+      const str = String(value);
+      // Remove dangerous characters that could be interpreted as formulas
+      return str.replace(/^[=+\-@]/, "'$&").replace(/"/g, '""');
+    };
+    
+    const rows = items.map(i => [
+      sanitizeCell(i.chargerId),
+      sanitizeCell(i.chargerSerial),
+      sanitizeCell(i.status),
+      sanitizeCell(i.location),
+      sanitizeCell(i.lastAction)
+    ]);
+    
+    let csv = header.join(",") + "\n" + 
+      rows.map(r => r.map(cell => `"${cell}"`).join(",")).join("\n");
+    
     let blob = new Blob([csv], {type: "text/csv"});
     let url = URL.createObjectURL(blob);
     let a = document.createElement("a");
     a.href = url;
-    a.download = "inventory.csv";
+    a.download = `inventory_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     showToast('CSV downloaded successfully', 'green');
@@ -2786,14 +2996,43 @@ window.downloadInventoryExcel = function() {
   console.log('downloadInventoryExcel called');
   try {
     if (typeof XLSX === 'undefined') {
-      showToast('Excel library not loaded', 'red');
+      console.error('XLSX library not available');
+      showToast('Excel feature not available. Please refresh the page.', 'red');
       return;
     }
+    
     const items = [...window.inventory];
+    if (!items.length) {
+      showToast('No inventory data to export', 'yellow');
+      return;
+    }
+    
+    // Sanitize data for Excel
+    const sanitizedItems = items.map(item => ({
+      'Charger ID': item.chargerId || '',
+      'Serial': item.chargerSerial || '',
+      'SIM Number': item.simNumber || '',
+      'Product': item.product || '',
+      'Model': item.model || '',
+      'Status': item.status || '',
+      'Location': item.location || '',
+      'Notes': item.notes || '',
+      'Last Action': item.lastAction ? new Date(item.lastAction).toLocaleString() : '',
+      'Added By': item.addedBy || ''
+    }));
+    
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(items);
+    const ws = XLSX.utils.json_to_sheet(sanitizedItems);
+    
+    // Set column widths
+    const colWidths = [
+      {wch: 20}, {wch: 15}, {wch: 15}, {wch: 25}, {wch: 20},
+      {wch: 12}, {wch: 20}, {wch: 30}, {wch: 18}, {wch: 15}
+    ];
+    ws['!cols'] = colWidths;
+    
     XLSX.utils.book_append_sheet(wb, ws, "Inventory");
-    XLSX.writeFile(wb, "inventory.xlsx");
+    XLSX.writeFile(wb, `inventory_${new Date().toISOString().split('T')[0]}.xlsx`);
     showToast('Excel downloaded successfully', 'green');
   } catch (error) {
     console.error('Excel download error:', error);
