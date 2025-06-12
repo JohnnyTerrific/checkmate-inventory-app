@@ -883,8 +883,11 @@ const location = filterLocation.value;
     // Select All logic (only for visible page)
     const selectAll = main.querySelector('#selectAll');
 if (selectAll) {
-  selectAll.checked = paginated.length > 0 && paginated.every(unit => window.selectedUnits.includes(unit.chargerId));
-  selectAll.indeterminate = paginated.some(unit => window.selectedUnits.includes(unit.chargerId)) && !selectAll.checked;
+  const allPageItemsSelected = paginated.length > 0 && paginated.every(unit => window.selectedUnits.includes(unit.chargerId));
+  
+  selectAll.checked = allPageItemsSelected;
+  selectAll.indeterminate = !allPageItemsSelected && paginated.some(unit => window.selectedUnits.includes(unit.chargerId));
+  
   selectAll.onchange = (e) => {
     if (e.target.checked) {
       paginated.forEach(unit => {
@@ -893,7 +896,7 @@ if (selectAll) {
         }
       });
     } else {
-      window.selectedUnits = window.selectedUnits.filter(id => !paginated.some(u => u.chargerId === id));
+      window.selectedUnits = [];
     }
     renderTableRows(); // re-render to update checked
     renderBulkActionBar();
@@ -903,21 +906,33 @@ if (selectAll) {
     // Pagination controls
     const paginationBar = main.querySelector('#paginationBar');
     const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+    const startRecord = Math.min(startIdx + 1, filtered.length);
+    const endRecord = Math.min(endIdx, filtered.length);
+    
     paginationBar.innerHTML = `
-      <div class="flex justify-center items-center gap-4 py-4">
+  <div class="flex flex-col items-center gap-3 py-4">
+    <div class="flex flex-col sm:flex-row items-center gap-4">
+      <div class="flex items-center gap-2">
         <button id="prevPageBtn" class="px-4 py-1 rounded bg-purple-600 text-white font-semibold hover:bg-purple-700 transition ${page === 1 ? 'opacity-50 cursor-not-allowed' : ''}" ${page === 1 ? 'disabled' : ''}>Prev</button>
         <span id="pageNumSpan" class="font-semibold">Page ${page} of ${pageCount}</span>
         <button id="nextPageBtn" class="px-4 py-1 rounded bg-purple-600 text-white font-semibold hover:bg-purple-700 transition ${page === pageCount ? 'opacity-50 cursor-not-allowed' : ''}" ${page === pageCount ? 'disabled' : ''}>Next</button>
-        <label class="ml-6">Show
-          <select id="pageSizeSelect" class="border px-2 py-1 rounded ml-2">
-            <option value="30" ${pageSize === 30 ? 'selected' : ''}>30</option>
-            <option value="50" ${pageSize === 50 ? 'selected' : ''}>50</option>
-            <option value="100" ${pageSize === 100 ? 'selected' : ''}>100</option>
-          </select>
-          entries per page
-        </label>
       </div>
-    `;
+      <label class="flex items-center gap-1 text-sm">
+        Show
+        <select id="pageSizeSelect" class="border px-2 py-1 rounded">
+          <option value="30" ${pageSize === 30 ? 'selected' : ''}>30</option>
+          <option value="50" ${pageSize === 50 ? 'selected' : ''}>50</option>
+          <option value="100" ${pageSize === 100 ? 'selected' : ''}>100</option>
+        </select>
+        entries per page
+      </label>
+    </div>
+    <div class="text-sm text-gray-600 dark:text-gray-400 text-center">
+      Showing ${startRecord} to ${endRecord} of ${filtered.length} entries
+      ${filtered.length !== window.inventory.length ? ` (filtered from ${window.inventory.length} total)` : ''}
+    </div>
+  </div>
+`;
   
     // Pagination event handlers
     main.querySelector('#prevPageBtn').onclick = () => {
@@ -1233,7 +1248,7 @@ if (selectAll) {
     const dialog = document.getElementById('actionDialog');
     const locations = await getAllLocationsWithContractors();
     const contractorLocations = (locations || []).filter(l => l.parent === "contractor");
-    const installedLocations = ["Customer Stock", "Public Network Stock"];
+    const installedLocations = locations.filter(l => l.parent === "customer" || l.parent === "public").map(l => l.name);
     const currentLocation = selected[0]?.location;
     let options = "";
   
@@ -1454,69 +1469,71 @@ if (selectAll) {
   
     dialog.querySelector('form').onsubmit = async e => {
       e.preventDefault();
-
+    
+      // Read all form values BEFORE replacing dialog content
       const newStatus = dialog.querySelector("#newStatus").value.trim();
       const statusComment = dialog.querySelector("#statusComment").value.trim();
       const privPub = dialog.querySelector("#privatePublic") ? dialog.querySelector("#privatePublic").value : "";
       const invoice = dialog.querySelector("#invoiceNumber") ? dialog.querySelector("#invoiceNumber").value.trim() : "";
-
+    
       if (!newStatus) {
         dialog.querySelector("#newStatus").classList.add('border-red-500');
         dialog.querySelector("#formError").textContent = "Please select a status.";
         return;
       }
-
-  
+    
       // Validate if Installed status requires Private/Public selection
       if (newStatus === "Installed" && !privPub) {
-      dialog.querySelector("#privatePublic").classList.add('border-red-500');
-      dialog.querySelector("#formError").textContent = "Please select Private or Public for installed status.";
-      return;
-    }
- 
+        dialog.querySelector("#privatePublic").classList.add('border-red-500');
+        dialog.querySelector("#formError").textContent = "Please select Private or Public for installed status.";
+        return;
+      }
+    
+      // NOW replace dialog content with loading spinner
       dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
-
+    
       let items = [...window.inventory];
-  const prevStates = [];
-  selected.forEach(unit => {
-    const idx = items.findIndex(i => i.chargerId === unit.chargerId);
-    if (idx >= 0) {
-      prevStates.push({...items[idx]});
-      items[idx].status = newStatus;
-      items[idx].lastAction = new Date().toISOString();
-      if (newStatus === "Installed") {
-        items[idx].location = "Customer Stock";
-        items[idx].isAsset = privPub === "Public";
-        items[idx].invoiceNumber = privPub === "Private" ? invoice : "";
+      const prevStates = [];
+      selected.forEach(unit => {
+        const idx = items.findIndex(i => i.chargerId === unit.chargerId);
+        if (idx >= 0) {
+          prevStates.push({...items[idx]});
+          items[idx].status = newStatus;
+          items[idx].lastAction = new Date().toISOString();
+          if (newStatus === "Installed") {
+            // Don't automatically set location - let user choose through move dialog
+            items[idx].isAsset = privPub === "Public";
+            items[idx].invoiceNumber = privPub === "Private" ? invoice : "";
+          }
+          if (statusComment) items[idx].notes = statusComment;
+        }
+      });
+    
+      // Update all items in database
+      for (const unit of selected) {
+        const idx = items.findIndex(i => i.chargerId === unit.chargerId);
+        if (idx >= 0) {
+          await updateSingleItem(items[idx]);
+        }
       }
-      if (statusComment) items[idx].notes = statusComment;
-    }
-  });
-    // Update all items in database
-    for (const unit of selected) {
-      const idx = items.findIndex(i => i.chargerId === unit.chargerId);
-      if (idx >= 0) {
-        await updateSingleItem(items[idx]);
-      }
-    }
-
-    // Create and save audit log entries
-    const newEntries = selected.map(unit => ({
-      date: new Date().toISOString(),
-      action: "Bulk Status Change",
-      chargerId: unit.chargerId,
-      chargerSerial: unit.chargerSerial,
-      simNumber: unit.simNumber,
-      product: unit.product,
-      from: unit.location,
-      to: items.find(i => i.chargerId === unit.chargerId)?.location || unit.location,
-      statusFrom: unit.status,
-      statusTo: newStatus,
-      user: getCurrentUserEmail(),
-      comment: statusComment
-    }));
-    await saveAuditLog(newEntries);
-  
+    
+      // Create and save audit log entries
+      const newEntries = selected.map(unit => ({
+        date: new Date().toISOString(),
+        action: "Bulk Status Change",
+        chargerId: unit.chargerId,
+        chargerSerial: unit.chargerSerial,
+        simNumber: unit.simNumber,
+        product: unit.product,
+        from: unit.location,
+        to: items.find(i => i.chargerId === unit.chargerId)?.location || unit.location,
+        statusFrom: unit.status,
+        statusTo: newStatus,
+        user: getCurrentUserEmail(),
+        comment: statusComment
+      }));
+      await saveAuditLog(newEntries);
+    
       // Undo support
       showUndoToast("Status changed", "blue", async () => {
         for (const prevState of prevStates) {
@@ -1530,7 +1547,7 @@ if (selectAll) {
         renderInventoryTable(document.getElementById('main-content'));
         window.selectedUnits = [];
       });
-  
+    
       dialog.close();
       window.selectedUnits = [];
       window.inventory = items;
@@ -1666,7 +1683,7 @@ window.toggleActionsMenu = function(idx) {
     const settings = await loadSettings();
     const locations = await getAllLocationsWithContractors();
     const contractorLocations = locations.filter(l => l.parent === "contractor");
-    const installedLocations = ["Customer Stock", "Public Network Stock"];
+    const installedLocations = locations.filter(l => l.parent === "customer" || l.parent === "public").map(l => l.name);
     let options = "";
     const currentLocation = unit.location;
   
@@ -1749,7 +1766,7 @@ window.toggleActionsMenu = function(idx) {
     
       // Define your key locations
       const contractorLocationsNames = (contractorLocations || []).map(l => l.name);
-      const installedLocations = ["Customer Stock", "Public Network Stock"];
+      const installedLocations = locations.filter(l => l.parent === "customer" || l.parent === "public").map(l => l.name);
       const fromLoc = unit.location;
       const toLoc = moveLoc;
     
