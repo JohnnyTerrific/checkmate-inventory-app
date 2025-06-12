@@ -664,14 +664,41 @@ function renderInventoryTable(main) {
   main.innerHTML = `
     <div class="flex flex-wrap gap-3 mb-4 items-center">
       <input id="searchInput" type="text" placeholder="Search Anything" class="border px-3 py-1 rounded" style="min-width:200px;">
-      <select id="filterStatus" class="border px-3 py-1 rounded">
-        <option value="">All Statuses</option>
-        ${[...new Set(window.inventory.map(i => i.status))].map(s => `<option value="${s}">${s}</option>`).join("")}
-      </select>
-      <select id="filterLocation" class="border px-3 py-1 rounded">
-        <option value="">All Locations</option>
-        ${[...new Set(window.inventory.map(i => i.location))].map(l => `<option value="${l}">${l}</option>`).join("")}
-      </select>
+
+            <!-- Multi-select Status Filter -->
+      <div class="relative">
+        <button id="statusFilterBtn" class="border px-3 py-1 rounded bg-white flex items-center gap-2 min-w-32">
+          <span id="statusFilterText">All Statuses</span>
+          <span>▼</span>
+        </button>
+        <div id="statusFilterDropdown" class="absolute top-full left-0 mt-1 bg-white border rounded shadow-lg z-50 hidden min-w-48 max-h-60 overflow-y-auto">
+          <div class="p-2 border-b">
+            <label class="flex items-center gap-2 text-sm font-semibold">
+              <input type="checkbox" id="selectAllStatuses">
+              Select All
+            </label>
+          </div>
+          <div id="statusCheckboxes" class="p-2 space-y-1"></div>
+        </div>
+      </div>
+      
+      <!-- Multi-select Location Filter -->
+      <div class="relative">
+        <button id="locationFilterBtn" class="border px-3 py-1 rounded bg-white flex items-center gap-2 min-w-32">
+          <span id="locationFilterText">All Locations</span>
+          <span>▼</span>
+        </button>
+        <div id="locationFilterDropdown" class="absolute top-full left-0 mt-1 bg-white border rounded shadow-lg z-50 hidden min-w-48 max-h-60 overflow-y-auto">
+          <div class="p-2 border-b">
+            <label class="flex items-center gap-2 text-sm font-semibold">
+              <input type="checkbox" id="selectAllLocations">
+              Select All
+            </label>
+          </div>
+          <div id="locationCheckboxes" class="p-2 space-y-1"></div>
+        </div>
+      </div>
+      
       <button id="downloadCSV" class="bg-gray-200 px-3 py-1 rounded">Download CSV</button>
       <button id="downloadExcel" class="bg-gray-200 px-3 py-1 rounded">Download Excel</button>
     </div>
@@ -700,12 +727,20 @@ function renderInventoryTable(main) {
     <div id="paginationBar"></div>
   `;
 
+    if (!window.inventoryFilters) {
+      window.inventoryFilters = {
+        selectedStatuses: new Set(),
+        selectedLocations: new Set()
+      };
+    }
+
     // First render the table rows
-    renderTableRows();
+        renderTableRows();
     
     // Then initialize search after DOM is ready
     setTimeout(() => {
       initializeInventorySearch();
+      initializeMultiSelectFilters();
     }, 50);
   }
 
@@ -725,16 +760,130 @@ function renderInventoryTable(main) {
     }
   });
 
+function initializeMultiSelectFilters() {
+  const main = document.getElementById('main-content');
+  if (!main) return;
+
+  // Get unique values
+  const allStatuses = [...new Set(window.inventory.map(i => i.status))].filter(Boolean).sort();
+  const allLocations = [...new Set(window.inventory.map(i => i.location))].filter(Boolean).sort();
+
+  // Setup status filter
+  setupMultiSelectFilter('status', allStatuses, 'Status');
+  setupMultiSelectFilter('location', allLocations, 'Location');
+
+  // Close dropdowns when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#statusFilterBtn') && !e.target.closest('#statusFilterDropdown')) {
+      document.getElementById('statusFilterDropdown')?.classList.add('hidden');
+    }
+    if (!e.target.closest('#locationFilterBtn') && !e.target.closest('#locationFilterDropdown')) {
+      document.getElementById('locationFilterDropdown')?.classList.add('hidden');
+    }
+  });
+}
+
+function setupMultiSelectFilter(type, allValues, label) {
+  const btn = document.getElementById(`${type}FilterBtn`);
+  const dropdown = document.getElementById(`${type}FilterDropdown`);
+  const checkboxes = document.getElementById(`${type}Checkboxes`);
+  const selectAll = document.getElementById(`selectAll${type === 'status' ? 'Statuses' : 'Locations'}`);
+
+  if (!btn || !dropdown || !checkboxes || !selectAll) return;
+
+    // Populate checkboxes
+    checkboxes.innerHTML = allValues.map(value => `
+      <label class="flex items-center gap-2 text-sm hover:bg-gray-50 p-1 rounded cursor-pointer">
+        <input type="checkbox" value="${value}" class="${type}-checkbox">
+        ${value}
+      </label>
+    `).join('');
+  
+    // Button click
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      dropdown.classList.toggle('hidden');
+      // Close other dropdown
+      const otherType = type === 'status' ? 'location' : 'status';
+      document.getElementById(`${otherType}FilterDropdown`)?.classList.add('hidden');
+    };
+  
+    // Select all checkbox
+    selectAll.onchange = (e) => {
+      const checkboxList = checkboxes.querySelectorAll(`.${type}-checkbox`);
+      if (e.target.checked) {
+        checkboxList.forEach(cb => {
+          cb.checked = true;
+          // FIX: Use the correct property name
+          const propertyName = type === 'status' ? 'selectedStatuses' : 'selectedLocations';
+          window.inventoryFilters[propertyName].add(cb.value);
+        });
+      } else {
+        checkboxList.forEach(cb => {
+          cb.checked = false;
+          // FIX: Use the correct property name
+          const propertyName = type === 'status' ? 'selectedStatuses' : 'selectedLocations';
+          window.inventoryFilters[propertyName].delete(cb.value);
+        });
+      }
+    updateFilterUI();
+    window.inventoryPage = 1;
+    renderTableRows();
+  };
+
+   // Individual checkboxes
+   checkboxes.addEventListener('change', (e) => {
+    if (e.target.classList.contains(`${type}-checkbox`)) {
+      // FIX: Use the correct property name
+      const propertyName = type === 'status' ? 'selectedStatuses' : 'selectedLocations';
+      
+      if (e.target.checked) {
+        window.inventoryFilters[propertyName].add(e.target.value);
+      } else {
+        window.inventoryFilters[propertyName].delete(e.target.value);
+      }
+      
+      // Update select all state
+      const allCheckboxList = checkboxes.querySelectorAll(`.${type}-checkbox`);
+      const checkedCheckboxList = checkboxes.querySelectorAll(`.${type}-checkbox:checked`);
+      selectAll.checked = allCheckboxList.length === checkedCheckboxList.length;
+      selectAll.indeterminate = checkedCheckboxList.length > 0 && checkedCheckboxList.length < allCheckboxList.length;
+      
+      updateFilterUI();
+      window.inventoryPage = 1;
+      renderTableRows();
+    }
+  });
+}
+
+function updateFilterUI() {
+  // Update status button text
+  const statusText = document.getElementById('statusFilterText');
+  if (statusText) {
+    const count = window.inventoryFilters.selectedStatuses.size;
+    statusText.textContent = count === 0 ? 'All Statuses' : 
+                            count === 1 ? [...window.inventoryFilters.selectedStatuses][0] : 
+                            `${count} Statuses`;
+  }
+
+  // Update location button text
+  const locationText = document.getElementById('locationFilterText');
+  if (locationText) {
+    const count = window.inventoryFilters.selectedLocations.size;
+    locationText.textContent = count === 0 ? 'All Locations' : 
+                              count === 1 ? [...window.inventoryFilters.selectedLocations][0] : 
+                              `${count} Locations`;
+  }
+}
+
   // Add this function after the renderInventoryTable function
   function initializeInventorySearch() {
     const main = document.getElementById('main-content');
     if (!main) return;
     
     const searchInput = main.querySelector('#searchInput');
-    const filterStatus = main.querySelector('#filterStatus');
-    const filterLocation = main.querySelector('#filterLocation');
     
-    if (!searchInput || !filterStatus || !filterLocation) {
+    if (!searchInput) {
       console.log('Search elements not found, retrying...');
       setTimeout(initializeInventorySearch, 100);
       return;
@@ -746,50 +895,48 @@ function renderInventoryTable(main) {
       renderTableRows();
     }, 250);
     
-    filterStatus.onchange = () => {
-      window.inventoryPage = 1;
-      renderTableRows();
-    };
-    
-    filterLocation.onchange = () => {
-      window.inventoryPage = 1;
-      renderTableRows();
-    };
-    
     console.log('Search functionality initialized');
   }
   
 
 // Fix the renderTableRows function to properly handle async permissions
 async function renderTableRows() {
-const main = document.getElementById('main-content');
-if (!main) return; 
-const canDelete = await canDeleteItems();
-const searchInput = main.querySelector('#searchInput');
-const filterStatus = main.querySelector('#filterStatus');
-const filterLocation = main.querySelector('#filterLocation');
-const tbody = main.querySelector('#inventoryTableBody');
-if (!searchInput || !filterStatus || !filterLocation || !tbody) return;
-const q = searchInput.value.toLowerCase();
-const status = filterStatus.value;
-const location = filterLocation.value;
-  
-    let filtered = window.inventory;
-    if (q) filtered = filtered.filter(i => {
-      const allFields = [
-        i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status,
-        i.location, i.notes, i.lastAction, i.addedBy, i.invoiceNumber
-      ];
-      return allFields.some(field => (field || '').toLowerCase().includes(q));
-    });
-    if (status) filtered = filtered.filter(i => i.status === status);
-    if (location) filtered = filtered.filter(i => i.location === location);
-  
-    const pageSize = window.inventoryPageSize;
-    const page = window.inventoryPage;
-    const startIdx = (page - 1) * pageSize;
-    const endIdx = startIdx + pageSize;
-    const paginated = filtered.slice(startIdx, endIdx);
+  const main = document.getElementById('main-content');
+  if (!main) return; 
+  const canDelete = await canDeleteItems();
+  const searchInput = main.querySelector('#searchInput');
+  const tbody = main.querySelector('#inventoryTableBody');
+  if (!searchInput || !tbody) return;
+  const q = searchInput.value.toLowerCase();
+    
+      let filtered = window.inventory;
+      
+      // Apply search filter
+      if (q) {
+        filtered = filtered.filter(i => {
+          const allFields = [
+            i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status,
+            i.location, i.notes, i.lastAction, i.addedBy, i.invoiceNumber
+          ];
+          return allFields.some(field => (field || '').toLowerCase().includes(q));
+        });
+      }
+      
+      // Apply status filter (NEW MULTI-SELECT LOGIC)
+      if (window.inventoryFilters?.selectedStatuses.size > 0) {
+        filtered = filtered.filter(i => window.inventoryFilters.selectedStatuses.has(i.status));
+      }
+      
+      // Apply location filter (NEW MULTI-SELECT LOGIC)
+      if (window.inventoryFilters?.selectedLocations.size > 0) {
+        filtered = filtered.filter(i => window.inventoryFilters.selectedLocations.has(i.location));
+      }
+    
+      const pageSize = window.inventoryPageSize;
+      const page = window.inventoryPage;
+      const startIdx = (page - 1) * pageSize;
+      const endIdx = startIdx + pageSize;
+      const paginated = filtered.slice(startIdx, endIdx);
   
     // Only keep selectedUnits that are visible in the filtered list
     window.selectedUnits = window.selectedUnits.filter(id => window.inventory.some(i => i.chargerId === id));

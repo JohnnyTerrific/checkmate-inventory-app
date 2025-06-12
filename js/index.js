@@ -189,6 +189,18 @@ async function calculateBusinessMetrics(inventory, products, settings, auditLog)
       price: product?.price,
       parsedValue: value
     });
+
+    let estimatedValue = value;
+  if (estimatedValue === 0) {
+    if (unit.model?.includes('SMART HOME MINI WALLBOX')) {
+      estimatedValue = 300; // Default estimate for wallbox
+    } else if (unit.model?.includes('DC Fast')) {
+      estimatedValue = 15000; // Default estimate for DC fast charger
+    } else {
+      estimatedValue = 500; // Generic default
+    }
+    console.log(`Using estimated value ${estimatedValue} for ${unit.chargerId}`);
+  }
     
     const locationObj = allLocations.find(loc => loc.name === unit.location);
     const parentId = locationObj?.parent || "other";
@@ -200,53 +212,53 @@ async function calculateBusinessMetrics(inventory, products, settings, auditLog)
       parentId: parentId
     });
     
-    if (parentId === "customer" || parentId === "public" || 
-      unit.status?.includes("Installed")) {
-    // Revenue-generating assets
-    metrics.financial.revenueAssets.count++;
-    metrics.financial.revenueAssets.value += value;
-    metrics.pipeline.deployed.push(unit);
-    
-    // ADD DEPRECIATION CALCULATION HERE
-    const deployedDate = new Date(unit.lastAction || unit.created || Date.now());
-    const monthsDeployed = Math.max(0, (Date.now() - deployedDate.getTime()) / (1000 * 60 * 60 * 24 * 30));
-    const depreciationRate = (product?.depreciationRate || 10) / 100; // Annual rate
-    const annualDepreciation = value * depreciationRate;
-    const totalDepreciation = Math.min(value * 0.9, (annualDepreciation * monthsDeployed / 12)); // Cap at 90%
-    const currentValue = Math.max(value * 0.1, value - totalDepreciation); // Floor at 10%
-    
-    metrics.depreciation.totalOriginal += value;
-    metrics.depreciation.totalCurrent += currentValue;
-    metrics.depreciation.assets.push({
-      chargerId: unit.chargerId,
-      originalValue: value,
-      currentValue: currentValue,
-      depreciation: totalDepreciation,
-      monthsDeployed: Math.round(monthsDeployed)
-    });
-    
-    console.log('Added to revenue assets:', unit.chargerId);
-    
-  } else if (parentId === "warehouse") {
-    // Idle inventory - cash tied up
-    metrics.financial.idleInventory.count++;
-    metrics.financial.idleInventory.value += value;
-    metrics.pipeline.warehouse.push(unit);
-    
-    console.log('Added to idle inventory:', unit.chargerId);
-    
-  } else if (parentId === "contractor") {
-    // In transit - being deployed
-    metrics.financial.inTransit.count++;
-    metrics.financial.inTransit.value += value;
-    metrics.pipeline.contractor.push(unit);
-    
-    console.log('Added to in transit:', unit.chargerId);
-    
-  } else {
-    metrics.pipeline.unknown.push(unit);
-    console.log('Added to unknown:', unit.chargerId, 'parentId:', parentId);
-  }  
+if (parentId === "customer" || parentId === "public" || 
+  unit.status?.includes("Installed")) {
+// Revenue-generating assets
+metrics.financial.revenueAssets.count++;
+metrics.financial.revenueAssets.value += estimatedValue; // FIXED: Use estimatedValue instead of value
+metrics.pipeline.deployed.push(unit);
+
+// ADD DEPRECIATION CALCULATION HERE
+const deployedDate = new Date(unit.lastAction || unit.created || Date.now());
+const monthsDeployed = Math.max(0, (Date.now() - deployedDate.getTime()) / (1000 * 60 * 60 * 24 * 30));
+const depreciationRate = (product?.depreciationRate || 10) / 100; // Annual rate
+const annualDepreciation = estimatedValue * depreciationRate; // FIXED: Use estimatedValue
+const totalDepreciation = Math.min(estimatedValue * 0.9, (annualDepreciation * monthsDeployed / 12)); // Cap at 90%
+const currentValue = Math.max(estimatedValue * 0.1, estimatedValue - totalDepreciation); // Floor at 10%
+
+metrics.depreciation.totalOriginal += estimatedValue; // FIXED: Use estimatedValue
+metrics.depreciation.totalCurrent += currentValue;
+metrics.depreciation.assets.push({
+  chargerId: unit.chargerId,
+  originalValue: estimatedValue, // FIXED: Use estimatedValue
+  currentValue: currentValue,
+  depreciation: totalDepreciation,
+  monthsDeployed: Math.round(monthsDeployed)
+});
+
+console.log('Added to revenue assets:', unit.chargerId, 'value:', estimatedValue);
+
+} else if (parentId === "warehouse") {
+// Idle inventory - cash tied up
+metrics.financial.idleInventory.count++;
+metrics.financial.idleInventory.value += estimatedValue; // FIXED: Use estimatedValue instead of value
+metrics.pipeline.warehouse.push(unit);
+
+console.log('Added to idle inventory:', unit.chargerId, 'value:', estimatedValue);
+
+} else if (parentId === "contractor") {
+// In transit - being deployed
+metrics.financial.inTransit.count++;
+metrics.financial.inTransit.value += estimatedValue; // FIXED: Use estimatedValue instead of value
+metrics.pipeline.contractor.push(unit);
+
+console.log('Added to in transit:', unit.chargerId, 'value:', estimatedValue);
+
+} else {
+metrics.pipeline.unknown.push(unit);
+console.log('Added to unknown:', unit.chargerId, 'parentId:', parentId);
+}
   
   // Asset health tracking
   if (unit.status === "Faulty") {
@@ -402,25 +414,38 @@ function renderAssetDistributionChart(metrics) {
     }
   }
   
-  // Use count data since value data is all 0
-  const data = [
+  // FIXED: Use value data first, fall back to count only if all values are 0
+  const valueData = [
+    metrics.financial?.revenueAssets?.value || 0,
+    metrics.financial?.idleInventory?.value || 0,
+    metrics.financial?.inTransit?.value || 0
+  ];
+  
+  const countData = [
     metrics.financial?.revenueAssets?.count || 0,
     metrics.financial?.idleInventory?.count || 0,
     metrics.financial?.inTransit?.count || 0
   ];
   
-  const totalValue = data.reduce((sum, val) => sum + val, 0);
+  const totalValue = valueData.reduce((sum, val) => sum + val, 0);
+  const totalCount = countData.reduce((sum, val) => sum + val, 0);
+  
+  // FIXED: Use value data if available, otherwise use count data
+  const useValueData = totalValue > 0;
+  const data = useValueData ? valueData : countData;
+  const total = useValueData ? totalValue : totalCount;
 
   console.log('Chart data:', {
-    revenueAssets: metrics.financial?.revenueAssets?.count || 0,
-    idleInventory: metrics.financial?.idleInventory?.count || 0,
-    inTransit: metrics.financial?.inTransit?.count || 0,
+    valueData,
+    countData,
     totalValue,
+    totalCount,
+    useValueData,
     data
   });
     
   // If no data, show a placeholder
-  if (totalValue === 0) {
+  if (total === 0) {
     ctx.clearRect(0, 0, container.width, container.height);
     ctx.fillStyle = '#9ca3af';
     ctx.font = '16px sans-serif';
@@ -449,12 +474,12 @@ function renderAssetDistributionChart(metrics) {
       responsive: true,
       maintainAspectRatio: false,
       animation: {
-        duration: 1000 // Add animation duration
+        duration: 1000
       },
       plugins: {
         title: {
           display: true,
-          text: `Total Units: ${totalValue}`,
+          text: useValueData ? `Total Value: $${total.toLocaleString()}` : `Total Units: ${total}`,
           font: { size: 18, weight: 'bold' },
           padding: {
             bottom: 15
@@ -484,8 +509,13 @@ function renderAssetDistributionChart(metrics) {
           callbacks: {
             label: function(context) {
               const value = context.raw;
-              const percent = totalValue > 0 ? Math.round(value / totalValue * 100) : 0;
-              return `${context.label}: ${value} units (${percent}%)`;
+              const percent = total > 0 ? Math.round(value / total * 100) : 0;
+              
+              if (useValueData) {
+                return `${context.label}: $${value.toLocaleString()} (${percent}%)`;
+              } else {
+                return `${context.label}: ${value} units (${percent}%)`;
+              }
             }
           }
         }
