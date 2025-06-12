@@ -1684,25 +1684,32 @@ window.toggleActionsMenu = function(idx) {
         `<option value="${l.name}">${l.name} (Warehouse)</option>`
       ).join("");
       
-      // Then add contractors
-      options += (contractorLocations || []).map(l =>
-        `<option value="${l.name}">${l.name}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
-      ).join("");
-    } else if ((contractorLocations || []).map(l => l.name).includes(currentLocation)) {
-      // From contractor location - can go to warehouses or installed locations
-      options = (locations || [])
-        .filter(l => l.name !== currentLocation && (l.parent === "warehouse" || installedLocations.includes(l.name)))
-        .map(l =>
-          `<option value="${l.name}">${l.name}${l.parent ? ` (${l.parent})` : ""}</option>`
-        ).join("");
-    } else {
-      // Default case - show all available locations except current
-      options = (locations || [])
-        .filter(l => l.name !== currentLocation)
-        .map(l =>
-          `<option value="${l.name}">${l.name}${l.parent ? ` (${l.parent})` : ""}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
-        ).join("");
-    }
+            // Then add contractors
+            options += (contractorLocations || []).map(l =>
+              `<option value="${l.name}">${l.name}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
+            ).join("");
+          } else if ((contractorLocations || []).map(l => l.name).includes(currentLocation)) {
+            // From contractor location - can go to warehouses or installed locations
+            options = (locations || [])
+              .filter(l => l.name !== currentLocation && l.parent === "warehouse")
+              .map(l =>
+                `<option value="${l.name}">${l.name} (${l.parent})</option>`
+              ).join("");
+            
+            // Also add the installed locations explicitly
+            installedLocations.forEach(installLoc => {
+              if (!options.includes(`value="${installLoc}"`)) {
+                options += `<option value="${installLoc}">${installLoc}</option>`;
+              }
+            });
+          } else {
+            // Default case - show all available locations except current
+            options = (locations || [])
+              .filter(l => l.name !== currentLocation)
+              .map(l =>
+                `<option value="${l.name}">${l.name}${l.parent ? ` (${l.parent})` : ""}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
+              ).join("");
+          }
   
     dialog.innerHTML = `
       <form method="dialog" class="flex flex-col gap-3 w-80">
