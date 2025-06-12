@@ -1232,7 +1232,7 @@ if (selectAll) {
   
     const dialog = document.getElementById('actionDialog');
     const locations = await getAllLocationsWithContractors();
-    const contractorLocations = (locations || []).filter(l => l.parent === "Contractor/Technician");
+    const contractorLocations = (locations || []).filter(l => l.parent === "contractor");
     const installedLocations = ["Customer Stock", "Public Network Stock"];
     const currentLocation = selected[0]?.location;
     let options = "";
@@ -1270,7 +1270,7 @@ if (selectAll) {
     <label>Set status (optional):</label>
     <select id="moveStatus" class="border px-2 py-1 rounded">
       <option value="">-- Keep Current Status --</option>
-      ${(settings.statuses || []).map(s => `<option value="${s}">${selected.every(u => u.status === s) ? " selected" : ""}>${s}</option>`).join("")}
+      ${(settings.statuses || []).map(s => `<option value="${s}"${selected.every(u => u.status === s) ? " selected" : ""}>${s}</option>`).join("")}
     </select>
     <textarea id="moveComment" placeholder="Comment (optional)" class="border px-2 py-1 rounded"></textarea>
     <div class="flex justify-between gap-2 mt-3">
@@ -1331,13 +1331,10 @@ if (selectAll) {
         const idx = items.findIndex(i => i.chargerId === unit.chargerId);
         if (idx >= 0) {
           prevStates.push({...items[idx]});
-          items[idx].status = newStatus;
+          if (moveLoc) items[idx].location = moveLoc;
+          if (moveStatus) items[idx].status = moveStatus;
           items[idx].lastAction = new Date().toISOString();
-          if (newStatus === "Installed") {
-            items[idx].location = "Customer Stock";
-            items[idx].isAsset = dialog.querySelector("#privatePublic").value === "Public";
-            items[idx].invoiceNumber = dialog.querySelector("#invoiceNumber").value.trim();
-          }
+          if (moveComment) items[idx].notes = moveComment;
         }
       });
       
@@ -1352,17 +1349,17 @@ if (selectAll) {
       // Create audit log entries
       const newEntries = selected.map(unit => ({
         date: new Date().toISOString(),
-        action: "Bulk Status Change",
+        action: "Bulk Move",
         chargerId: unit.chargerId,
         chargerSerial: unit.chargerSerial,
         simNumber: unit.simNumber,
         product: unit.product,
         from: unit.location,
-        to: items.find(i => i.chargerId === unit.chargerId)?.location || unit.location,
+        to: moveLoc || unit.location,
         statusFrom: unit.status,
-        statusTo: newStatus,
+        statusTo: moveStatus || unit.status,
         user: getCurrentUserEmail(),
-        comment: dialog.querySelector("#statusComment").value.trim()
+        comment: moveComment
       }));
       await saveAuditLog(newEntries);
     
@@ -1457,66 +1454,68 @@ if (selectAll) {
   
     dialog.querySelector('form').onsubmit = async e => {
       e.preventDefault();
+
       const newStatus = dialog.querySelector("#newStatus").value.trim();
+      const statusComment = dialog.querySelector("#statusComment").value.trim();
+      const privPub = dialog.querySelector("#privatePublic") ? dialog.querySelector("#privatePublic").value : "";
+      const invoice = dialog.querySelector("#invoiceNumber") ? dialog.querySelector("#invoiceNumber").value.trim() : "";
+
       if (!newStatus) {
         dialog.querySelector("#newStatus").classList.add('border-red-500');
         dialog.querySelector("#formError").textContent = "Please select a status.";
         return;
       }
-      dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
-      let valid = !!newStatus;
-      dialog.querySelector("#formError").textContent = "";
-      if (newStatus === "Installed" && !dialog.querySelector("#privatePublic").value) {
-        dialog.querySelector("#privatePublic").classList.add('border-red-500');
-        valid = false;
-      }
-      if (!valid) {
-        dialog.querySelector("#formError").textContent = "Select all required fields.";
-        return;
-      }
-      let items = [...window.inventory];
-      const prevStates = [];
-      selected.forEach(unit => {
-        const idx = items.findIndex(i => i.chargerId === unit.chargerId);
-        if (idx >= 0) {
-          prevStates.push({...items[idx]});
-          items[idx].status = newStatus;
-          items[idx].lastAction = new Date().toISOString();
-          if (newStatus === "Installed") {
-            items[idx].location = "Customer Stock";
-            items[idx].isAsset = dialog.querySelector("#privatePublic").value === "Public";
-            items[idx].invoiceNumber = dialog.querySelector("#invoiceNumber").value.trim();
-          }
-        }
-      });
-      for (const unit of selected) {
-        const idx = items.findIndex(i => i.chargerId === unit.chargerId);
-        if (idx >= 0) {
-          await updateSingleItem(items[idx]);
-        }
-      }
+
   
-      // Audit log
-      const newEntries = selected.map(unit => ({
-        date: new Date().toISOString(),
-        action: "Bulk Status Change",
-        chargerId: unit.chargerId,
-        chargerSerial: unit.chargerSerial,
-        simNumber: unit.simNumber,
-        product: unit.product,
-        from: unit.location,
-        to: items.find(i => i.chargerId === unit.chargerId)?.location || unit.location,
-        statusFrom: unit.status,
-        statusTo: newStatus,
-        user: getCurrentUserEmail(),
-        comment: dialog.querySelector("#statusComment").value.trim()
-      }));
-      for (const unit of selected) {
-        const idx = items.findIndex(i => i.chargerId === unit.chargerId);
-        if (idx >= 0) {
-          await updateSingleItem(items[idx]);
-        }
+      // Validate if Installed status requires Private/Public selection
+      if (newStatus === "Installed" && !privPub) {
+      dialog.querySelector("#privatePublic").classList.add('border-red-500');
+      dialog.querySelector("#formError").textContent = "Please select Private or Public for installed status.";
+      return;
+    }
+ 
+      dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
+
+      let items = [...window.inventory];
+  const prevStates = [];
+  selected.forEach(unit => {
+    const idx = items.findIndex(i => i.chargerId === unit.chargerId);
+    if (idx >= 0) {
+      prevStates.push({...items[idx]});
+      items[idx].status = newStatus;
+      items[idx].lastAction = new Date().toISOString();
+      if (newStatus === "Installed") {
+        items[idx].location = "Customer Stock";
+        items[idx].isAsset = privPub === "Public";
+        items[idx].invoiceNumber = privPub === "Private" ? invoice : "";
       }
+      if (statusComment) items[idx].notes = statusComment;
+    }
+  });
+    // Update all items in database
+    for (const unit of selected) {
+      const idx = items.findIndex(i => i.chargerId === unit.chargerId);
+      if (idx >= 0) {
+        await updateSingleItem(items[idx]);
+      }
+    }
+
+    // Create and save audit log entries
+    const newEntries = selected.map(unit => ({
+      date: new Date().toISOString(),
+      action: "Bulk Status Change",
+      chargerId: unit.chargerId,
+      chargerSerial: unit.chargerSerial,
+      simNumber: unit.simNumber,
+      product: unit.product,
+      from: unit.location,
+      to: items.find(i => i.chargerId === unit.chargerId)?.location || unit.location,
+      statusFrom: unit.status,
+      statusTo: newStatus,
+      user: getCurrentUserEmail(),
+      comment: statusComment
+    }));
+    await saveAuditLog(newEntries);
   
       // Undo support
       showUndoToast("Status changed", "blue", async () => {
@@ -1666,7 +1665,7 @@ window.toggleActionsMenu = function(idx) {
     // Await settings and locations
     const settings = await loadSettings();
     const locations = await getAllLocationsWithContractors();
-    const contractorLocations = locations.filter(l => l.parent === "Contractor/Technician");
+    const contractorLocations = locations.filter(l => l.parent === "contractor");
     const installedLocations = ["Customer Stock", "Public Network Stock"];
     let options = "";
     const currentLocation = unit.location;
