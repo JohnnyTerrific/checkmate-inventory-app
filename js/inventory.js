@@ -30,6 +30,10 @@ async function canDeleteItems() {
   return role === 'SuperAdmin'; // Only SuperAdmin can delete
 }
 
+async function isSuperAdmin() {
+  return (await getCurrentUserRole()) === 'SuperAdmin';
+}
+
 // 1) Load entire inventory from Firestore
 export async function loadInventory() {
   const snapshot = await getDocs(collection(db, "inventory"));
@@ -288,40 +292,40 @@ window.openBulkAddDialog = async function() {
   const userRole = await getCurrentUserRole();
 
   dialog.innerHTML = `
-        <form method="dialog" class="flex flex-col gap-3 w-full sm:w-[32rem] max-w-2xl">
-      <h3 class="font-bold mb-2">Bulk Add Units</h3>
-      <div class="text-sm text-gray-600 mb-2">
-        Paste columns: <b>Model</b>, <b>Charger ID, Serial, SIM Number</b> (one per line)<br>
-        <b>Example:</b> SMART HOME MINI WALLBOX 5m Cable, 0312108101120001,TSAC03-24120109,89354080012345678901
-      </div>
-      <label>Default Location:
-        <select id="bulkLocation" class="border px-2 py-1 rounded w-full">
-        ${(settings.locations || []).map(loc => `<option value="${loc.name}" ${loc.name === 'Back Warehouse' ? 'selected' : ''}>${loc.name}</option>`).join("")}
-        </select>
-      </label>
-      <label>Default Status:
-        <select id="bulkStatus" class="border px-2 py-1 rounded w-full">
-        ${(settings.statuses || [])
-          .filter(s => {
-            // Filter out restricted statuses for non-admins
-            if (userRole === 'Agent') {
-              return !['Decommissioned', 'Lost'].includes(s);
-            }
-            return true;
-          })
-          .map(s => `<option value="${s}" ${s === 'In Stock' ? 'selected' : ''}>${s}</option>`).join("")}
-        </select>
-      </label>
-      <label>Default Comment (optional):
-        <textarea id="bulkComment" rows="2" class="border px-2 py-1 rounded w-full" placeholder="Optional comment for all items"></textarea>
-      </label>
-      <textarea id="bulkText" rows="7" class="border px-2 py-1 rounded w-full" placeholder="Paste here"></textarea>
-      <div class="flex justify-between gap-2 mt-3">
-        <button type="button" value="cancel" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
-        <button value="ok" class="bg-purple-600 text-white px-3 py-1 rounded">Add All</button>
-      </div>
-    </form>
-  `;
+      <form method="dialog" class="flex flex-col gap-3 w-full sm:w-[32rem] max-w-2xl">
+    <h3 class="font-bold mb-2">Bulk Add Units</h3>
+    <div class="text-sm text-gray-600 mb-2">
+      Paste columns: <b>Model</b>, <b>Charger ID, Serial, SIM Number, Comment</b> (one per line)<br>
+      <b>Example:</b> SMART HOME MINI WALLBOX 5m Cable, 0312108101120001,TSAC03-24120109,89354080012345678901,<span class="text-blue-700">belongs to Johnn - 50st LA</span>
+    </div>
+    <label>Default Location:
+      <select id="bulkLocation" class="border px-2 py-1 rounded w-full">
+      ${(settings.locations || []).map(loc => `<option value="${loc.name}" ${loc.name === 'Back Warehouse' ? 'selected' : ''}>${loc.name}</option>`).join("")}
+      </select>
+    </label>
+    <label>Default Status:
+      <select id="bulkStatus" class="border px-2 py-1 rounded w-full">
+      ${(settings.statuses || [])
+        .filter(s => {
+          // Filter out restricted statuses for non-admins
+          if (userRole === 'Agent') {
+            return !['Decommissioned', 'Lost'].includes(s);
+          }
+          return true;
+        })
+        .map(s => `<option value="${s}" ${s === 'In Stock' ? 'selected' : ''}>${s}</option>`).join("")}
+      </select>
+    </label>
+    <label>Default Comment (optional):
+      <textarea id="bulkComment" rows="2" class="border px-2 py-1 rounded w-full" placeholder="Optional comment for all items"></textarea>
+    </label>
+    <textarea id="bulkText" rows="7" class="border px-2 py-1 rounded w-full" placeholder="Paste here"></textarea>
+    <div class="flex justify-between gap-2 mt-3">
+      <button type="button" value="cancel" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
+      <button value="ok" class="bg-purple-600 text-white px-3 py-1 rounded">Add All</button>
+    </div>
+  </form>
+`;
   dialog.showModal();
 
   dialog.addEventListener('click', function(e) {
@@ -330,49 +334,49 @@ window.openBulkAddDialog = async function() {
 
   dialog.querySelector('button[value="cancel"]').onclick = e => { e.preventDefault(); dialog.close(); };
   
-dialog.querySelector('form').onsubmit = async e => {
-  e.preventDefault();
-  // Read values BEFORE replacing innerHTML
-  const rows = dialog.querySelector("#bulkText").value.trim().split("\n");
-  const defaultLocation = dialog.querySelector("#bulkLocation").value;
-  const defaultStatus = dialog.querySelector("#bulkStatus").value;
-  const defaultComment = dialog.querySelector("#bulkComment").value.trim();
-
-  dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
-
-  let items = [...window.inventory];
-  let added = 0;
-  let existingIds = new Set(items.map(i => i.chargerId));
-
-  for (let row of rows) {
-    // Accept tab-separated OR comma-separated
-    let [model, chargerId, chargerSerial, simNumber] = row.split(/\t|,/).map(v => v?.trim());
-    if (!chargerId || existingIds.has(chargerId)) continue;
-    existingIds.add(chargerId);
-    items.push({
-      chargerId,
-      chargerSerial: chargerSerial || "",
-      simNumber: simNumber || "",
-      model: model || "",
-      product: model || "",
-      location: defaultLocation,
-      status: defaultStatus,
-      assigned: false,
-      created: new Date().toISOString(),
-      addedBy: getCurrentUserEmail(),
-      lastAction: new Date().toISOString(),
-      notes: defaultComment
-    });
-    added++;
-  }
-  for (const item of items.slice(window.inventory.length)) {
-    await updateSingleItem(item);
-  }
-  showToast(`Bulk added ${added} units`, "green");
-  dialog.close();
-  window.inventory = items;
-  renderInventoryTable(document.getElementById('main-content'));
-};
+  dialog.querySelector('form').onsubmit = async e => {
+    e.preventDefault();
+    // Read values BEFORE replacing innerHTML
+    const rows = dialog.querySelector("#bulkText").value.trim().split("\n");
+    const defaultLocation = dialog.querySelector("#bulkLocation").value;
+    const defaultStatus = dialog.querySelector("#bulkStatus").value;
+    const defaultComment = dialog.querySelector("#bulkComment").value.trim();
+  
+    dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
+  
+    let items = [...window.inventory];
+    let added = 0;
+    let existingIds = new Set(items.map(i => i.chargerId));
+  
+    for (let row of rows) {
+      // Accept tab-separated OR comma-separated, allow up to 5 columns
+      let [model, chargerId, chargerSerial, simNumber, comment] = row.split(/\t|,/).map(v => v?.trim());
+      if (!chargerId || existingIds.has(chargerId)) continue;
+      existingIds.add(chargerId);
+      items.push({
+        chargerId,
+        chargerSerial: chargerSerial || "",
+        simNumber: simNumber || "",
+        model: model || "",
+        product: model || "",
+        location: defaultLocation,
+        status: defaultStatus,
+        assigned: false,
+        created: new Date().toISOString(),
+        addedBy: getCurrentUserEmail(),
+        lastAction: new Date().toISOString(),
+        notes: comment || defaultComment // Use row comment if present, else default
+      });
+      added++;
+    }
+    for (const item of items.slice(window.inventory.length)) {
+      await updateSingleItem(item);
+    }
+    showToast(`Bulk added ${added} units`, "green");
+    dialog.close();
+    window.inventory = items;
+    renderInventoryTable(document.getElementById('main-content'));
+  };
   }; 
 
   window.bulkDelete = async function() {
@@ -441,9 +445,9 @@ dialog.querySelector('form').onsubmit = async e => {
   };
 
   async function injectInventoryFABs() {
-    const canManage = await canManageInventory();
-    // Remove FABs if on mobile
-    if (window.innerWidth < 640 || !canManage) {
+    const isSuper = await isSuperAdmin();
+    // Remove FABs if on mobile or not SuperAdmin
+    if (window.innerWidth < 640 || !isSuper) {
       ['addItemBtn', 'bulkAddBtn', 'addShipmentBtn'].forEach(id => {
         const btn = document.getElementById(id);
         if (btn) btn.remove();
@@ -1762,38 +1766,39 @@ window.toggleActionsMenu = function(idx) {
     
       // ...existing validation and move logic...
       dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
-    
+
       let items = [...window.inventory];
       const idx = items.findIndex(i => i.chargerId === unit.chargerId);
       if (idx >= 0) {
-        items[idx].location = moveLoc;
+        if (moveLoc) { // Only update if a new location is selected
+          items[idx].location = moveLoc;
+        }
         if (moveStatus) items[idx].status = moveStatus;
         items[idx].lastAction = new Date().toISOString();
         items[idx].notes = moveComment;
       }
       await updateSingleItem(items[idx]);
-
-
+    
       await saveAuditLog([{
-  date: new Date().toISOString(),
-  action: "Move",
-  chargerId: unit.chargerId,
-  chargerSerial: unit.chargerSerial,
-  simNumber: unit.simNumber,
-  product: unit.product,
-  from: unit.location,
-  to: moveLoc,
-  statusFrom: unit.status,
-  statusTo: moveStatus || unit.status,
-  user: getCurrentUserEmail(),
-  comment: moveComment
-}]);
+        date: new Date().toISOString(),
+        action: "Move",
+        chargerId: unit.chargerId,
+        chargerSerial: unit.chargerSerial,
+        simNumber: unit.simNumber,
+        product: unit.product,
+        from: unit.location,
+        to: moveLoc || unit.location, // Show correct "to" in audit log
+        statusFrom: unit.status,
+        statusTo: moveStatus || unit.status,
+        user: getCurrentUserEmail(),
+        comment: moveComment
+      }]);
 
       showToast("Unit moved", "blue");
-      dialog.close();
-      window.inventory = items;
-      renderInventoryTable(document.getElementById('main-content'));
-    };
+  dialog.close();
+  window.inventory = items;
+  renderInventoryTable(document.getElementById('main-content'));
+};
   };
 
 
