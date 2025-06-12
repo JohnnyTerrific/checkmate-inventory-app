@@ -375,6 +375,8 @@ async function addProduct(prod) {
   if (!prod) return;
   products = await loadProducts();
   prod.order = products.length > 0 ? Math.max(...products.map(p => p.order)) + 1 : 0;
+  // Remove id field if present (addDoc will generate it)
+  if ('id' in prod) delete prod.id;
   await saveProduct(prod);
   showToast("Product added", "green");
   await renderProductsGrid();
