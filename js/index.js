@@ -260,20 +260,18 @@ metrics.pipeline.unknown.push(unit);
 console.log('Added to unknown:', unit.chargerId, 'parentId:', parentId);
 }
   
-  // Asset health tracking
-  if (unit.status === "Faulty") {
-    metrics.health.faulty++;
-    metrics.strategic.assetHealth.faulty++;
-  } else if (unit.status === "RMA") {
-    metrics.health.rma++;
-    metrics.strategic.assetHealth.maintenance++;
-  } else if (unit.status?.includes("In Stock") || unit.status?.includes("Installed")) {
-    metrics.health.operational++;
-    metrics.strategic.assetHealth.healthy++;
-  } else {
-    metrics.health.maintenance++;
-    metrics.strategic.assetHealth.maintenance++;
-  }
+    // Asset health tracking
+    if (unit.status === "Faulty") {
+      metrics.health.faulty++;
+      metrics.strategic.assetHealth.faulty++;
+    } else if (unit.status === "RMA") {
+      metrics.health.rma++;
+      metrics.strategic.assetHealth.maintenance++;
+    } else {
+      // Everything else is considered operational/healthy
+      metrics.health.operational++;
+      metrics.strategic.assetHealth.healthy++;
+    }
 });
 
   // Calculate financial metrics
