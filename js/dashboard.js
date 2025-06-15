@@ -144,22 +144,6 @@ function injectDashboardPage() {
               <div class="text-sm text-gray-600 dark:text-gray-400">Inventory Turnover</div>
             </div>
           </div>
-        </div>
-      </div>
-
-            <!-- FULL WIDTH Location Distribution Chart - Gets ALL the space it wants! -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Top Locations & Model Distribution</h3>
-          <button id="locationChartExport" class="text-sm text-purple-600 hover:text-purple-700">
-            Export
-          </button>
-        </div>
-        <div class="w-full" style="height: 700px;"> <!-- Increased from 600px to 700px -->
-          <canvas id="locationBar"></canvas>
-        </div>
-      </div>
-    </section>
   `;
 }
   
@@ -330,75 +314,6 @@ function renderStatusPills(statusMap, chartLabels, chartColors, onClickStatus) {
   };
   container.appendChild(resetBtn);
 }
-  
-  function renderPublicMeter(stats) {
-    const ctx = document.getElementById('publicMeter').getContext('2d');
-    const percent = stats.total > 0 ? Math.round((stats.publicCount / stats.total) * 100) : 0;
-  
-    if (window.publicMeterChart && typeof window.publicMeterChart.destroy === 'function') {
-      window.publicMeterChart.destroy();
-    }
-  
-    // Create a gradient for the public portion
-    const rainbowColors = [
-      'rgba(255,0,0,0.7)',    // Red
-      'rgba(255,127,0,0.7)',  // Orange
-      'rgba(255,255,0,0.7)',  // Yellow
-      'rgba(0,255,0,0.7)',    // Green
-      'rgba(0,0,255,0.7)',    // Blue
-      'rgba(75,0,130,0.7)',   // Indigo
-      'rgba(143,0,255,0.7)'   // Violet
-    ];
-    const colorIdx = stats.publicCount % rainbowColors.length;
-    window.publicMeterChart = new Chart(ctx, {
-      type: 'doughnut',
-      data: {
-        labels: ['Public', 'Other'],
-        datasets: [{
-          data: [stats.publicCount, stats.total - stats.publicCount],
-          backgroundColor: [rainbowColors[colorIdx], 'rgba(209,213,219,0.4)'],
-          borderWidth: 2,
-          borderColor: '#fff',
-          hoverOffset: 8
-        }]
-      },
-      options: {
-        cutout: '80%',
-        plugins: {
-          legend: { display: false },
-          tooltip: { enabled: true },
-          datalabels: {
-            color: ['#b45309', '#6b7280'],
-            font: { weight: 'bold', size: 16 },
-            formatter: (value, context) => {
-              if (context.dataIndex === 0) {
-                return `${percent}%`;
-              }
-              return '';
-            }
-          }
-        }
-      },
-      plugins: [ChartDataLabels]
-    });
-  
-    // Animate the label (count up)
-    const label = document.getElementById('publicMeterLabel');
-    let current = 0;
-    const target = percent;
-    const step = Math.ceil(target / 24) || 1;
-    function animate() {
-      if (current < target) {
-        current += step;
-        if (current > target) current = target;
-        label.textContent = `Public Chargers: ${current}% (${stats.publicCount} of ${stats.total})`;
-        requestAnimationFrame(animate);
-      } else {
-        label.textContent = `Public Chargers: ${target}% (${stats.publicCount} of ${stats.total})`;
-      }
-    }
-    animate();
-  }
 
   const rainbowColors = [
     '#ff0000', // Red
@@ -642,286 +557,618 @@ async function renderAgingAlerts(stats, inventory) {
     : '<li>No overdue items</li>';
 }
 
-function getChartPlugins() {
-  const plugins = [];
-  if (typeof ChartDataLabels !== 'undefined') {
-    plugins.push(ChartDataLabels);
-  }
-  return plugins;
-}
-
 async function renderLocationStackedBar(locStats, inventory) {
-  const ctx = document.getElementById('locationBar').getContext('2d');
-  if (window.locationBarChart && typeof window.locationBarChart.destroy === 'function') {
-    window.locationBarChart.destroy();
-  }
-
-  const settings = await loadSettings();
-  const sortedLocations = Object.entries(locStats)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 15);
-
-  // Get all unique models and shorten their names for the legend
-  const allModels = [...new Set(inventory.map(i => i.model || 'Unknown'))];
-  const modelShortNames = {};
+  // Try to find the old canvas container first
+  let container = document.querySelector('#locationBar')?.parentElement;
   
-  allModels.forEach(model => {
-    if (model.includes('SMART HOME MINI WALLBOX')) {
-      modelShortNames[model] = model.replace('SMART HOME MINI WALLBOX', 'SHMW');
-    } else if (model.includes('DC Fast EV Charger')) {
-      modelShortNames[model] = model.replace('DC Fast EV Charger', 'DC Fast');
-    } else if (model.includes('EV WALLBOX Pro-Smart OCPP')) {
-      modelShortNames[model] = 'EV WALLBOX Pro';
-    } else if (model.length > 25) {
-      modelShortNames[model] = model.substring(0, 22) + '...';
+  // If not found, create a new container or find an appropriate parent
+  if (!container) {
+    // Look for any existing chart container or create one
+    container = document.querySelector('.grid.grid-cols-1.lg\\:grid-cols-3.gap-6.mb-8');
+    if (container) {
+      // Add a new full-width section after the charts
+      const newSection = document.createElement('div');
+      newSection.className = 'bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-8 col-span-full';
+      newSection.id = 'locationDistributionSection';
+      container.parentElement.insertBefore(newSection, container.nextSibling);
+      container = newSection;
     } else {
-      modelShortNames[model] = model;
+      console.error('Could not find suitable container for location distribution');
+      return;
+    }
+  }
+  
+  // Replace the canvas with a more flexible container
+  container.innerHTML = `
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Inventory Distribution</h3>
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-600">View:</label>
+          <select id="viewModeSelector" class="text-sm border rounded px-2 py-1">
+            <option value="treemap">Treemap View</option>
+            <option value="heatmap">Heatmap View</option>
+            <option value="cards">Card View</option>
+          </select>
+        </div>
+        <button id="locationChartExport" class="text-sm text-purple-600 hover:text-purple-700">
+          Export
+        </button>
+      </div>
+    </div>
+    
+    <!-- Search and Filter Bar -->
+    <div class="mb-4 flex gap-3 items-center">
+      <input type="text" id="locationSearch" placeholder="Search locations..." 
+             class="flex-1 px-3 py-2 border rounded-lg text-sm">
+      <select id="modelFilter" class="px-3 py-2 border rounded-lg text-sm">
+        <option value="">All Models</option>
+      </select>
+      <button id="resetFilters" class="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm">
+        Reset
+      </button>
+    </div>
+    
+    <!-- View Container -->
+    <div id="inventoryViewContainer" class="w-full" style="min-height: 600px;">
+      <!-- Dynamic content will be inserted here -->
+    </div>
+    
+    <!-- Quick Stats Bar -->
+    <div id="quickStats" class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+      <!-- Stats will be populated here -->
+    </div>
+  `;
+
+  // Initialize the enhanced view
+  await initializeInventoryView(locStats, inventory);
+}
+
+async function initializeInventoryView(locStats, inventory) {
+  const settings = await loadSettings();
+  
+  // Prepare data structures
+  const locationData = prepareLocationData(inventory, settings);
+  const allModels = [...new Set(inventory.map(i => i.model || 'Unknown'))];
+  
+  // Populate model filter
+  const modelFilter = document.getElementById('modelFilter');
+  modelFilter.innerHTML = '<option value="">All Models</option>' + 
+    allModels.map(model => `<option value="${model}">${model}</option>`).join('');
+  
+  // Set up event listeners
+  setupInventoryViewListeners(locationData, inventory, settings);
+  
+  // Render initial view (treemap by default)
+  renderTreemapView(locationData);
+  updateQuickStats(locationData);
+}
+
+function prepareLocationData(inventory, settings) {
+  const locationData = {};
+  
+  inventory.forEach(item => {
+    const location = item.location || 'Unknown';
+    const model = item.model || 'Unknown';
+    
+    if (!locationData[location]) {
+      locationData[location] = {
+        total: 0,
+        models: {},
+        parentInfo: getLocationParentInfo(location, settings)
+      };
+    }
+    
+    locationData[location].total++;
+    locationData[location].models[model] = (locationData[location].models[model] || 0) + 1;
+  });
+  
+  return locationData;
+}
+
+function getLocationParentInfo(locationName, settings) {
+  const locationConfig = settings.locations?.find(l => l.name === locationName);
+  if (locationConfig?.parent) {
+    const parent = settings.parentContainers?.find(p => p.id === locationConfig.parent);
+    return parent ? { name: parent.name, id: parent.id } : null;
+  }
+  return null;
+}
+
+function setupInventoryViewListeners(locationData, inventory, settings) {
+  const viewSelector = document.getElementById('viewModeSelector');
+  const searchInput = document.getElementById('locationSearch');
+  const modelFilter = document.getElementById('modelFilter');
+  const resetButton = document.getElementById('resetFilters');
+  
+  viewSelector.addEventListener('change', (e) => {
+    const mode = e.target.value;
+    const filteredData = applyFilters(locationData, searchInput.value, modelFilter.value);
+    
+    switch(mode) {
+      case 'treemap':
+        renderTreemapView(filteredData);
+        break;
+      case 'heatmap':
+        renderHeatmapView(filteredData, inventory);
+        break;
+      case 'cards':
+        renderCardView(filteredData);
+        break;
     }
   });
   
-  // Create datasets for each model
-  const datasets = allModels.map((model, index) => {
-    const data = sortedLocations.map(([loc]) => {
-      return inventory.filter(i => i.location === loc && (i.model || 'Unknown') === model).length;
-    });
+  searchInput.addEventListener('input', () => {
+    const filteredData = applyFilters(locationData, searchInput.value, modelFilter.value);
+    renderCurrentView(filteredData, inventory);
+  });
+  
+  modelFilter.addEventListener('change', () => {
+    const filteredData = applyFilters(locationData, searchInput.value, modelFilter.value);
+    renderCurrentView(filteredData, inventory);
+  });
+  
+  resetButton.addEventListener('click', () => {
+    searchInput.value = '';
+    modelFilter.value = '';
+    renderCurrentView(locationData, inventory);
+  });
+}
 
-    return {
-      label: modelShortNames[model],
-      data: data,
-      backgroundColor: rainbowColors[index % rainbowColors.length] + 'DD',
-      borderColor: rainbowColors[index % rainbowColors.length],
-      borderWidth: 1,
-      borderRadius: 2,
-      originalModel: model
-    };
-  }).filter(dataset => dataset.data.some(val => val > 0));
+function applyFilters(locationData, searchTerm, modelFilter) {
+  const filtered = {};
+  
+  Object.entries(locationData).forEach(([location, data]) => {
+    // Apply search filter
+    if (searchTerm && !location.toLowerCase().includes(searchTerm.toLowerCase())) {
+      return;
+    }
+    
+    // Apply model filter
+    let filteredModels = { ...data.models };
+    if (modelFilter) {
+      filteredModels = { [modelFilter]: data.models[modelFilter] || 0 };
+    }
+    
+    const total = Object.values(filteredModels).reduce((sum, count) => sum + count, 0);
+    if (total > 0) {
+      filtered[location] = {
+        ...data,
+        models: filteredModels,
+        total: total
+      };
+    }
+  });
+  
+  return filtered;
+}
 
-  window.locationBarChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: sortedLocations.map(([loc]) => loc),
-      datasets: datasets
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: {
-        mode: 'index', // FIXED: Better interaction mode
-        intersect: false
-      },
-      plugins: {
-        legend: { 
-          display: true,
-          position: 'right',
-          labels: { 
-            boxWidth: 12, 
-            font: { size: 10 },
-            padding: 15,
-            usePointStyle: true,
-            pointStyle: 'circle'
-          }
-        },
-        tooltip: {
-          mode: 'index',
-          intersect: false,
-          backgroundColor: 'rgba(0, 0, 0, 0.9)', // FIXED: More opaque
-          titleColor: '#ffffff',
-          bodyColor: '#ffffff',
-          borderColor: '#374151',
-          borderWidth: 1,
-          cornerRadius: 8,
-          padding: 12, // FIXED: Better padding
-          displayColors: true,
-          callbacks: {
-            title: function(context) {
-              const loc = context[0].label;
-              const locationConfig = settings.locations?.find(l => l.name === loc);
-              let parentInfo = "";
-              if (locationConfig?.parent) {
-                const parent = settings.parentContainers?.find(p => p.id === locationConfig.parent);
-                if (parent) parentInfo = ` (${parent.name})`;
-              }
-              return loc + parentInfo;
-            },
-            label: function(context) {
-              const dataset = context.dataset;
-              const originalModel = dataset.originalModel || dataset.label;
-              const value = context.parsed.x;
-              return `${originalModel}: ${value} units`;
-            },
-            footer: function(context) {
-              const total = context.reduce((sum, item) => sum + item.parsed.x, 0);
-              return `Total: ${total} units`;
-            }
-          }
-        }
-      },
-      scales: {
-        x: {
-          type: 'linear',
-          beginAtZero: true,
-          ticks: {
-            callback: function(value) {
-              return Number.isInteger(value) ? value.toString() : '';
-            },
-            font: { size: 11 },
-            stepSize: 1
-          },
-          stacked: true,
-          grid: {
-            color: 'rgba(0, 0, 0, 0.1)',
-            lineWidth: 1
-          },
-          title: {
-            display: true,
-            text: 'Number of Units',
-            font: { size: 12, weight: 'bold' }
-          }
-        },
-        y: {
-          stacked: true,
-          ticks: { 
-            font: { size: 11 },
-            maxRotation: 0,
-            padding: 15,
-            callback: function(value, index) {
-              const label = this.getLabelForValue(value);
-              return label.length > 20 ? label.substring(0, 17) + '...' : label;
-            }
-          },
-          grid: {
-            display: false
-          },
-          title: {
-            display: true,
-            text: 'Locations',
-            font: { size: 12, weight: 'bold' }
-          }
-        }
-      },
-      onClick: function(evt, elements) {
-        // FIXED: Better click detection for both bars and Y-axis area
-        if (elements.length > 0) {
-          const idx = elements[0].index;
-          const loc = this.data.labels[idx];
-          showLocationModelBreakdown(loc, inventory);
-        } else {
-          // FIXED: Handle clicks on Y-axis labels
-          const rect = ctx.canvas.getBoundingClientRect();
-          const x = evt.clientX - rect.left;
-          const y = evt.clientY - rect.top;
-          const chartArea = this.chartArea;
-          
-          // Check if click is on Y-axis label area
-          if (x >= 0 && x <= chartArea.left && y >= chartArea.top && y <= chartArea.bottom) {
-            const locationIndex = Math.floor((y - chartArea.top) / (chartArea.height / sortedLocations.length));
+function renderCurrentView(locationData, inventory) {
+  const viewMode = document.getElementById('viewModeSelector').value;
+  
+  switch(viewMode) {
+    case 'treemap':
+      renderTreemapView(locationData);
+      break;
+    case 'heatmap':
+      renderHeatmapView(locationData, inventory);
+      break;
+    case 'cards':
+      renderCardView(locationData);
+      break;
+  }
+  
+  updateQuickStats(locationData);
+}
+
+function renderTreemapView(locationData) {
+  const container = document.getElementById('inventoryViewContainer');
+  
+  // Sort locations by total count
+  const sortedLocations = Object.entries(locationData)
+    .sort((a, b) => b[1].total - a[1].total)
+    .slice(0, 20); // Limit to top 20 for better UX
+  
+  // Calculate total for percentage calculations
+  const grandTotal = sortedLocations.reduce((sum, [, data]) => sum + data.total, 0);
+  
+  container.innerHTML = `
+    <div class="grid gap-2" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+      ${sortedLocations.map(([location, data], index) => {
+        const percentage = ((data.total / grandTotal) * 100).toFixed(1);
+        const color = rainbowColors[index % rainbowColors.length];
+        
+        // Calculate relative size for visual hierarchy
+        const maxCount = sortedLocations[0][1].total;
+        const relativeSize = Math.max(0.3, data.total / maxCount);
+        const minHeight = 80;
+        const maxHeight = 200;
+        const height = minHeight + (maxHeight - minHeight) * relativeSize;
+        
+        return `
+          <div class="location-treemap-item bg-white dark:bg-gray-800 rounded-lg border-2 hover:shadow-lg transition-all cursor-pointer group"
+               style="height: ${height}px; border-color: ${color}25; background: linear-gradient(135deg, ${color}10, ${color}05);"
+               data-location="${location}"
+               data-location-data='${JSON.stringify(data)}'>
             
-            if (locationIndex >= 0 && locationIndex < sortedLocations.length) {
-              const [loc] = sortedLocations[locationIndex];
-              showLocationModelBreakdown(loc, inventory);
-            }
-          }
-        }
-      }
+            <div class="p-3 h-full flex flex-col justify-between relative overflow-hidden">
+              <!-- Location Header -->
+              <div class="flex-shrink-0">
+                <div class="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate" title="${location}">
+                  ${location}
+                </div>
+                ${data.parentInfo ? `
+                  <div class="text-xs text-gray-500 truncate" title="${data.parentInfo.name}">
+                    ${data.parentInfo.name}
+                  </div>
+                ` : ''}
+              </div>
+              
+              <!-- Count Display -->
+              <div class="flex-1 flex items-center justify-center">
+                <div class="text-center">
+                  <div class="text-2xl font-bold" style="color: ${color}">
+                    ${data.total}
+                  </div>
+                  <div class="text-xs text-gray-500">
+                    ${percentage}% of total
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Model Preview -->
+              <div class="flex-shrink-0">
+                <div class="text-xs text-gray-400 truncate">
+                  ${Object.keys(data.models).length} model${Object.keys(data.models).length !== 1 ? 's' : ''}
+                </div>
+              </div>
+              
+              <!-- Hover Indicator -->
+              <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+    
+    ${sortedLocations.length === 0 ? `
+      <div class="flex items-center justify-center h-40 text-gray-500">
+        <div class="text-center">
+          <svg class="w-12 h-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          <p>No locations match your current filters</p>
+        </div>
+      </div>
+    ` : ''}
+  `;
+
+  // Add event delegation for location clicks
+  container.addEventListener('click', (e) => {
+    const locationItem = e.target.closest('.location-treemap-item');
+    if (locationItem) {
+      const location = locationItem.dataset.location;
+      const data = JSON.parse(locationItem.dataset.locationData);
+      showLocationBreakdown(location, data);
     }
   });
 }
 
-async function showLocationModelBreakdown(loc, inventory) {
+function renderHeatmapView(locationData, inventory) {
+  const container = document.getElementById('inventoryViewContainer');
+  
+  // Get all unique models
+  const allModels = [...new Set(inventory.map(i => i.model || 'Unknown'))];
+  const locations = Object.keys(locationData).slice(0, 15); // Limit for readability
+  
+  // Find max count for color intensity calculation
+  const maxCount = Math.max(...Object.values(locationData).flatMap(data => Object.values(data.models)));
+  
+  container.innerHTML = `
+    <div class="overflow-x-auto">
+      <table class="w-full border-collapse">
+        <thead>
+          <tr>
+            <th class="p-2 text-left font-semibold text-sm border-b">Location</th>
+            ${allModels.slice(0, 10).map(model => `
+              <th class="p-2 text-center font-semibold text-xs border-b transform -rotate-45 origin-bottom-left" 
+                  style="min-width: 80px;" title="${model}">
+                ${model.length > 15 ? model.substring(0, 12) + '...' : model}
+              </th>
+            `).join('')}
+            <th class="p-2 text-center font-semibold text-sm border-b">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${locations.map(location => {
+            const data = locationData[location];
+            return `
+              <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer location-row"
+                  data-location="${location}"
+                  data-location-data='${JSON.stringify(data)}'>
+                <td class="p-2 font-medium text-sm border-b truncate" title="${location}">
+                  ${location}
+                  ${data.parentInfo ? `<div class="text-xs text-gray-500">${data.parentInfo.name}</div>` : ''}
+                </td>
+                ${allModels.slice(0, 10).map(model => {
+                  const count = data.models[model] || 0;
+                  const intensity = count > 0 ? Math.min(1, count / maxCount) : 0;
+                  const colorIndex = allModels.indexOf(model) % rainbowColors.length;
+                  const color = rainbowColors[colorIndex];
+                  
+                  return `
+                    <td class="p-2 text-center text-xs border-b"
+                        style="background-color: ${count > 0 ? `${color}${Math.floor(intensity * 255).toString(16).padStart(2, '0')}` : 'transparent'}; color: ${intensity > 0.5 ? 'white' : 'inherit'}">
+                      ${count > 0 ? count : ''}
+                    </td>
+                  `;
+                }).join('')}
+                <td class="p-2 text-center font-bold border-b">${data.total}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  // Add event delegation for row clicks
+  container.addEventListener('click', (e) => {
+    const locationRow = e.target.closest('.location-row');
+    if (locationRow) {
+      const location = locationRow.dataset.location;
+      const data = JSON.parse(locationRow.dataset.locationData);
+      showLocationBreakdown(location, data);
+    }
+  });
+}
+
+function renderCardView(locationData) {
+  const container = document.getElementById('inventoryViewContainer');
+  
+  const sortedLocations = Object.entries(locationData)
+    .sort((a, b) => b[1].total - a[1].total);
+  
+  container.innerHTML = `
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      ${sortedLocations.map(([location, data], index) => {
+        const color = rainbowColors[index % rainbowColors.length];
+        const topModels = Object.entries(data.models)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3);
+        
+        return `
+          <div class="bg-white dark:bg-gray-800 rounded-lg border shadow-sm hover:shadow-md transition-shadow cursor-pointer location-card"
+               style="border-left: 4px solid ${color};"
+               data-location="${location}"
+               data-location-data='${JSON.stringify(data)}'>
+            <div class="p-4">
+              <div class="flex items-start justify-between mb-3">
+                <div class="flex-1 min-w-0">
+                  <h4 class="font-semibold text-gray-900 dark:text-gray-100 truncate" title="${location}">
+                    ${location}
+                  </h4>
+                  ${data.parentInfo ? `
+                    <p class="text-sm text-gray-500 truncate">${data.parentInfo.name}</p>
+                  ` : ''}
+                </div>
+                <div class="text-right flex-shrink-0">
+                  <div class="text-2xl font-bold" style="color: ${color}">
+                    ${data.total}
+                  </div>
+                  <div class="text-xs text-gray-500">units</div>
+                </div>
+              </div>
+              
+              <div class="space-y-1">
+                <div class="text-xs text-gray-500 mb-2">Top Models:</div>
+                ${topModels.map(([model, count]) => `
+                  <div class="flex justify-between items-center text-sm">
+                    <span class="truncate flex-1 pr-2" title="${model}">
+                      ${model.length > 20 ? model.substring(0, 17) + '...' : model}
+                    </span>
+                    <span class="font-medium flex-shrink-0">${count}</span>
+                  </div>
+                `).join('')}
+                ${Object.keys(data.models).length > 3 ? `
+                  <div class="text-xs text-gray-400 italic">
+                    +${Object.keys(data.models).length - 3} more model${Object.keys(data.models).length - 3 !== 1 ? 's' : ''}
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+
+  // Add event delegation for card clicks
+  container.addEventListener('click', (e) => {
+    const locationCard = e.target.closest('.location-card');
+    if (locationCard) {
+      const location = locationCard.dataset.location;
+      const data = JSON.parse(locationCard.dataset.locationData);
+      showLocationBreakdown(location, data);
+    }
+  });
+}
+
+function updateQuickStats(locationData) {
+  const container = document.getElementById('quickStats');
+  
+  const totalLocations = Object.keys(locationData).length;
+  const totalUnits = Object.values(locationData).reduce((sum, data) => sum + data.total, 0);
+  const allModels = new Set();
+  Object.values(locationData).forEach(data => {
+    Object.keys(data.models).forEach(model => allModels.add(model));
+  });
+  
+  const avgUnitsPerLocation = totalLocations > 0 ? Math.round(totalUnits / totalLocations) : 0;
+  
+  container.innerHTML = `
+    <div class="bg-white dark:bg-gray-800 rounded-lg p-3 text-center border">
+      <div class="text-lg font-bold text-blue-600">${totalLocations}</div>
+      <div class="text-xs text-gray-500">Locations</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg p-3 text-center border">
+      <div class="text-lg font-bold text-green-600">${totalUnits}</div>
+      <div class="text-xs text-gray-500">Total Units</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg p-3 text-center border">
+      <div class="text-lg font-bold text-purple-600">${allModels.size}</div>
+      <div class="text-xs text-gray-500">Unique Models</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg p-3 text-center border">
+      <div class="text-lg font-bold text-orange-600">${avgUnitsPerLocation}</div>
+      <div class="text-xs text-gray-500">Avg per Location</div>
+    </div>
+  `;
+}
+
+// Enhanced location breakdown modal
+function showLocationBreakdown(location, data) {
   let dialog = document.getElementById('chargerListDialog');
   if (!dialog) {
     dialog = document.createElement('dialog');
     dialog.id = 'chargerListDialog';
-    dialog.className = 'rounded-xl p-6 max-w-2xl';
+    dialog.className = 'rounded-xl p-0 max-w-4xl w-full mx-auto max-h-[90vh] overflow-hidden backdrop:bg-black backdrop:bg-opacity-50';
     document.body.appendChild(dialog);
   }
   
-  // Load settings to get parent container information
-  const settings = await loadSettings();
-  const chargers = inventory.filter(i => i.location === loc);
-  
-  // Get model breakdown for this location
-  const locationModels = {};
-  chargers.forEach(i => {
-    const model = i.model || 'Unknown';
-    locationModels[model] = (locationModels[model] || 0) + 1;
-  });
-  
-  // Get parent container info
-  const locationConfig = settings.locations?.find(l => l.name === loc);
-  let parentInfo = "";
-  if (locationConfig?.parent) {
-    const parent = settings.parentContainers?.find(p => p.id === locationConfig.parent);
-    if (parent) {
-      parentInfo = `<div class="text-sm text-gray-500 mb-3">Parent Container: <span class="font-medium">${parent.name}</span></div>`;
-    }
-  }
-  
-  // Sort models by quantity (descending)
-  const sortedModels = Object.entries(locationModels).sort((a, b) => b[1] - a[1]);
+  const sortedModels = Object.entries(data.models).sort((a, b) => b[1] - a[1]);
   
   dialog.innerHTML = `
-    <div class="mb-4">
-      <div class="text-xl font-bold text-purple-700 dark:text-purple-300 mb-2">
-        ${loc} - Model Distribution
+    <div class="bg-white dark:bg-gray-800 rounded-xl overflow-hidden">
+      <!-- Header -->
+      <div class="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-6">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-2xl font-bold">${location}</h2>
+            ${data.parentInfo ? `
+              <p class="text-purple-200 text-sm">Parent: ${data.parentInfo.name}</p>
+            ` : ''}
+            <p class="text-purple-200 text-sm">${data.total} total units • ${sortedModels.length} model types</p>
+          </div>
+          <button onclick="this.closest('dialog').close()" 
+                  class="text-white hover:text-gray-200 transition">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
       </div>
-      ${parentInfo}
-      <div class="text-sm text-gray-600 dark:text-gray-400">
-        Total Units: <span class="font-bold">${chargers.length}</span>
-      </div>
-    </div>
-    
-    <div class="overflow-auto mb-6" style="max-height: 400px;">
-      <div class="grid gap-3">
-        ${sortedModels.map(([model, count]) => {
-          const percentage = ((count / chargers.length) * 100).toFixed(1);
-          const colorIndex = Object.keys(locationModels).indexOf(model);
-          const color = rainbowColors[colorIndex % rainbowColors.length];
-          
-          return `
-            <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-              <div class="flex items-start justify-between mb-2 gap-4">
-                <div class="font-semibold text-gray-900 dark:text-gray-100 flex-1 min-w-0">
-                  <div class="break-words">${model}</div>
+      
+      <!-- Content -->
+      <div class="p-6 max-h-96 overflow-y-auto">
+        <div class="grid gap-4">
+          ${sortedModels.map(([model, count], index) => {
+            const percentage = ((count / data.total) * 100).toFixed(1);
+            const color = rainbowColors[index % rainbowColors.length];
+            
+            return `
+              <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 hover:bg-gray-100 dark:hover:bg-gray-600 transition cursor-pointer"
+                   onclick="showUnitsForModel('${location}', '${model}')">
+                <div class="flex items-center justify-between mb-2">
+                  <div class="font-semibold text-gray-900 dark:text-gray-100 flex-1 min-w-0 pr-4">
+                    <div class="truncate" title="${model}">${model}</div>
+                  </div>
+                  <div class="text-right flex-shrink-0">
+                    <div class="text-xl font-bold" style="color: ${color}">${count}</div>
+                    <div class="text-sm text-gray-500">${percentage}%</div>
+                  </div>
                 </div>
-                <div class="text-lg font-bold flex-shrink-0" style="color: ${color}">${count} units</div>
-              </div>
-              <div class="flex items-center gap-2">
-                <div class="flex-1 bg-gray-200 dark:bg-gray-600 rounded-full h-2">
+                <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2">
                   <div class="h-2 rounded-full transition-all duration-500" 
                        style="width: ${percentage}%; background: ${color}"></div>
                 </div>
-                <span class="text-sm text-gray-600 dark:text-gray-400 font-medium flex-shrink-0">${percentage}%</span>
               </div>
-            </div>
-          `;
-        }).join('')}
+            `;
+          }).join('')}
+        </div>
       </div>
-    </div>
-    
-    <div class="flex justify-between items-center">
-      <button class="text-sm text-purple-600 hover:text-purple-700 underline" 
-              id="viewIndividualUnitsBtn">
-        View Individual Units
-      </button>
-      <button class="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 transition" 
-              id="closeDialogBtn">
-        Close
-      </button>
+      
+      <!-- Footer -->
+      <div class="bg-gray-50 dark:bg-gray-700 p-4 flex justify-between items-center">
+        <button onclick="showAllUnitsForLocation('${location}')"
+                class="text-purple-600 hover:text-purple-700 underline text-sm">
+          View All Individual Units
+        </button>
+        <button onclick="this.closest('dialog').close()" 
+                class="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 transition">
+          Close
+        </button>
+      </div>
     </div>
   `;
   
-  // FIXED: Add event listeners after DOM creation
-  document.getElementById('viewIndividualUnitsBtn').addEventListener('click', () => {
-    showChargerListForLocation(loc, inventory);
-  });
-  
-  document.getElementById('closeDialogBtn').addEventListener('click', () => {
-    dialog.close();
-  });
-  
   dialog.showModal();
+}
+
+// Add these helper functions for the drill-down functionality
+async function showUnitsForModel(location, model) {
+  const inventory = await loadInventory();
+  const units = inventory.filter(i => i.location === location && (i.model || 'Unknown') === model);
+  
+  const dialog = document.getElementById('chargerListDialog');
+  const content = dialog.querySelector('.p-6');
+  
+  content.innerHTML = `
+    <div class="mb-4">
+      <h3 class="text-lg font-semibold mt-2">${model} Units in ${location} (${units.length})</h3>
+    </div>
+    
+    <div class="grid gap-2 max-h-80 overflow-y-auto">
+      ${units.map(unit => `
+        <div class="bg-white dark:bg-gray-800 rounded p-3 border">
+          <div class="flex justify-between items-start">
+            <div>
+              <div class="font-medium">${unit.chargerId}</div>
+              <div class="text-sm text-gray-500">Status: ${unit.status || 'Unknown'}</div>
+            </div>
+            <div class="text-xs text-gray-400">
+              ${unit.assignedDate ? new Date(unit.assignedDate).toLocaleDateString() : ''}
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+async function showAllUnitsForLocation(location) {
+  const inventory = await loadInventory();
+  const units = inventory.filter(i => i.location === location);
+  
+  const dialog = document.getElementById('chargerListDialog');
+  const content = dialog.querySelector('.p-6');
+  
+  content.innerHTML = `
+    <div class="mb-4">
+      <h3 class="text-lg font-semibold mt-2">All Units in ${location} (${units.length})</h3>
+    </div>
+    
+    <div class="grid gap-2 max-h-80 overflow-y-auto">
+      ${units.map(unit => `
+        <div class="bg-white dark:bg-gray-800 rounded p-3 border">
+          <div class="flex justify-between items-start">
+            <div>
+              <div class="font-medium">${unit.chargerId}</div>
+              <div class="text-sm text-gray-600">${unit.model || 'Unknown Model'}</div>
+              <div class="text-sm text-gray-500">Status: ${unit.status || 'Unknown'}</div>
+            </div>
+            <div class="text-xs text-gray-400">
+              ${unit.assignedDate ? new Date(unit.assignedDate).toLocaleDateString() : ''}
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
 }
 
 async function showChargerListForStatus(status) {
@@ -948,85 +1195,6 @@ async function showChargerListForStatus(status) {
   `;
   dialog.showModal();
 }
-  
-async function showChargerListForLocation(loc, inventory) {
-  let dialog = document.getElementById('chargerListDialog');
-  if (!dialog) {
-    dialog = document.createElement('dialog');
-    dialog.id = 'chargerListDialog';
-    dialog.className = 'rounded-xl p-5 max-w-2xl w-full mx-4';
-    document.body.appendChild(dialog);
-  }
-  
-  // Load settings to get parent container information
-  const settings = await loadSettings();
-  const chargers = inventory.filter(i => i.location === loc);
-  
-  // Get parent container info
-  const locationConfig = settings.locations?.find(l => l.name === loc);
-  let parentInfo = "";
-  if (locationConfig?.parent) {
-    const parent = settings.parentContainers?.find(p => p.id === locationConfig.parent);
-    if (parent) {
-      parentInfo = `<div class="text-sm text-gray-500">Parent: ${parent.name}</div>`;
-    }
-  }
-  
-  dialog.innerHTML = `
-    <div class="mb-4">
-      <div class="text-xl font-bold text-purple-700 dark:text-purple-300 mb-2">
-        Individual Units at ${loc}
-      </div>
-      ${parentInfo}
-      <button class="text-sm text-purple-600 hover:text-purple-700 underline" 
-              id="backToModelBtn">
-        ← Back to Model Breakdown
-      </button>
-    </div>
-    
-    <div class="overflow-auto mb-4" style="max-height:350px">
-      ${chargers.map(i =>
-        `<div class="mb-2 p-2 bg-gray-50 dark:bg-gray-800 rounded shadow">
-          <div><b>ID:</b> ${i.chargerId}</div>
-          <div><b>Status:</b> ${i.status}</div>
-          <div><b>Model:</b> <span class="break-words">${i.model}</span></div>
-        </div>`
-      ).join("")}
-    </div>
-    
-    <div class="flex justify-end">
-      <button class="bg-purple-600 text-white px-4 py-2 rounded" 
-              id="closeDialogBtn2">
-        Close
-      </button>
-    </div>
-  `;
-  
-  // FIXED: Add event listeners after DOM creation
-  document.getElementById('backToModelBtn').addEventListener('click', () => {
-    showLocationModelBreakdown(loc, inventory);
-  });
-  
-  document.getElementById('closeDialogBtn2').addEventListener('click', () => {
-    dialog.close();
-  });
-  
-  dialog.showModal();
-}
-  
-  function getLocationCounts(inventory) {
-    const locCounts = {};
-    inventory.forEach(i => {
-      const key = i.location || 'Unknown';
-      locCounts[key] = (locCounts[key] || 0) + 1;
-    });
-    // Sort by value descending for nicer chart, limit to top 10
-    return Object.fromEntries(
-      Object.entries(locCounts)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10)  // Only top 10
-    );
-  }
 
   function waitForMainContent(cb) {
     const el = document.getElementById('main-content');
@@ -1078,7 +1246,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             
             renderLostMeter(stats, inventory);
-            await renderLocationStackedBar(getLocationCounts(inventory), inventory);
+            await renderLocationStackedBar(null, inventory);
             
             updateLoadingProgress('Setting up event handlers...');
             // Add refresh functionality
@@ -1128,7 +1296,7 @@ document.addEventListener('DOMContentLoaded', () => {
           await renderAgingAlerts(stats, inventory);
           renderStatusDonut(stats.byStatus);
           renderLostMeter(stats, inventory);
-          await renderLocationStackedBar(getLocationCounts(inventory), inventory);
+          await renderLocationStackedBar(null, inventory);
           
           document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
           
