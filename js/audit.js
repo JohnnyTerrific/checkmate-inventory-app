@@ -14,13 +14,18 @@ let auditData = {
 
 // Wait for both DOM and shell to be ready
 document.addEventListener('DOMContentLoaded', async () => {
+  showLoadingScreen();
+  updateLoadingProgress('Initializing audit system...');
+
   // Wait for shell to load the main-content element
   await waitForElement('main-content');
 
   try {
+    updateLoadingProgress('Checking permissions...');
     // Check if user has permission to view audit logs
     const canViewAudit = await can('viewDashboard');
     if (!canViewAudit) {
+      hideLoadingScreen();
       renderAccessDenied();
       return;
     }
@@ -28,6 +33,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await initializeAuditPage();
   } catch (error) {
     console.error('Error initializing audit page:', error);
+    hideLoadingScreen();
     renderError('Failed to initialize audit page');
   }
 });
@@ -115,44 +121,49 @@ async function initializeAuditPage() {
   const mainContent = document.getElementById('main-content');
   if (!mainContent) {
     console.error('main-content element not found');
+    hideLoadingScreen();
     return;
   }
   
   try {
-    // Show loading state
-    mainContent.innerHTML = `
-      <div class="flex items-center justify-center h-64">
-        <div class="text-center">
-          <div class="loader mb-4"></div>
-          <p>Loading audit logs...</p>
-        </div>
-      </div>
-    `;
-
+    updateLoadingProgress('Loading audit data...');
     // Load and filter audit data
     await loadAuditData();
     
+    updateLoadingProgress('Setting up interface...');
     // Render the audit interface
     await renderAuditInterface();
     
+    updateLoadingProgress('Initializing controls...');
     // Initialize event listeners
     initializeEventListeners();
     
+    updateLoadingProgress('Rendering table...');
     // Initial render
     renderAuditTable();
     
+    updateLoadingProgress('Audit log ready!');
+    
+    // Hide loading screen after a brief delay
+    setTimeout(() => {
+      hideLoadingScreen();
+    }, 500);
+    
   } catch (error) {
     console.error('Error initializing audit page:', error);
+    hideLoadingScreen();
     renderError('Failed to load audit logs');
   }
 }
 
 async function loadAuditData() {
   try {
+    updateLoadingProgress('Fetching audit entries...');
     const logs = ((await loadAuditLog()) || []).reverse();
     const userRole = await getCurrentUserRole();
     const currentUser = getCurrentUser();
     
+    updateLoadingProgress('Filtering entries by permissions...');
     // Store original logs
     auditData.logs = logs;
     
@@ -172,6 +183,27 @@ async function loadAuditData() {
   } catch (error) {
     console.error('Error loading audit data:', error);
     throw new Error('Failed to load audit logs from database');
+  }
+}
+
+async function refreshAuditLog() {
+  showLoadingScreen();
+  updateLoadingProgress('Refreshing audit data...');
+  
+  try {
+    await loadAuditData();
+    updateLoadingProgress('Updating display...');
+    renderAuditTable();
+    updateLoadingProgress('Refresh complete!');
+    showToast('Audit log refreshed successfully', 'green');
+    
+    setTimeout(() => {
+      hideLoadingScreen();
+    }, 500);
+  } catch (error) {
+    console.error('Error refreshing audit log:', error);
+    hideLoadingScreen();
+    showToast('Failed to refresh audit log', 'red');
   }
 }
 
@@ -219,8 +251,16 @@ async function renderAuditInterface() {
             </div>
             
             <!-- Export buttons -->
-            ${canExport ? `
+                        ${canExport ? `
             <div class="flex gap-2">
+              <button id="refreshAuditBtn" 
+                      class="px-4 py-2 rounded-lg bg-blue-100 dark:bg-blue-700 text-blue-800 dark:text-blue-200 
+                             font-semibold hover:bg-blue-200 dark:hover:bg-blue-600 shadow transition flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                Refresh
+              </button>
               <button id="exportAuditCSV" 
                       class="px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 
                              font-semibold hover:bg-gray-200 dark:hover:bg-gray-600 shadow transition flex items-center gap-2">
@@ -282,6 +322,12 @@ function initializeEventListeners() {
   const searchInput = document.getElementById('auditSearch');
   if (searchInput) {
     searchInput.addEventListener('input', handleSearch);
+  }
+
+  // Refresh functionality
+  const refreshButton = document.getElementById('refreshAuditBtn');
+  if (refreshButton) {
+    refreshButton.addEventListener('click', refreshAuditLog);
   }
 
   // Export functionality
@@ -566,6 +612,69 @@ function exportToXLSX() {
     showToast('Failed to export XLSX', 'red');
   }
 }
+
+function showLoadingScreen() {
+  // Remove any existing loading screen
+  const existingLoader = document.getElementById('auditLoadingScreen');
+  if (existingLoader) {
+    existingLoader.remove();
+  }
+
+  // Create loading screen HTML
+  const loadingHTML = `
+    <div id="auditLoadingScreen" class="fixed inset-0 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 flex items-center justify-center z-50">
+      <div class="text-center">
+        <!-- Pulsating Logo -->
+        <div class="loading-pulse mb-8">
+          <div class="w-24 h-24 mx-auto bg-white rounded-2xl flex items-center justify-center shadow-2xl">
+            <svg class="w-16 h-16 text-purple-600" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+          </div>
+        </div>
+        
+        <!-- Loading Text -->
+        <h2 class="text-3xl font-bold text-white mb-4">CheckMate</h2>
+        <p class="text-purple-200 text-lg mb-8">Loading Audit Log</p>
+        
+        <!-- Loading Dots -->
+        <div class="flex justify-center space-x-2">
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+        </div>
+        
+        <!-- Progress Text -->
+        <p id="auditLoadingProgress" class="text-purple-300 mt-6 text-sm">Initializing...</p>
+      </div>
+    </div>
+  `;
+
+    // Insert loading screen
+    document.body.insertAdjacentHTML('beforeend', loadingHTML);
+  }
+  
+  function hideLoadingScreen() {
+    const loadingScreen = document.getElementById('auditLoadingScreen');
+    if (loadingScreen) {
+      loadingScreen.style.opacity = '0';
+      loadingScreen.style.transition = 'opacity 0.5s ease-out';
+      setTimeout(() => {
+        loadingScreen.remove();
+      }, 500);
+    }
+  }
+
+  function updateLoadingProgress(message) {
+    const progressElement = document.getElementById('auditLoadingProgress');
+    if (progressElement) {
+      progressElement.textContent = message;
+    }
+  }
+
+
+
+
 
 // Expose function for retry button
 window.initializeAuditPage = initializeAuditPage;
