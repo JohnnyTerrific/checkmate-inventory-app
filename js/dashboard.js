@@ -557,28 +557,38 @@ async function renderAgingAlerts(stats, inventory) {
     : '<li>No overdue items</li>';
 }
 
+// REPLACE the renderLocationStackedBar function with this fixed version:
 async function renderLocationStackedBar(locStats, inventory) {
-  // Try to find the old canvas container first
-  let container = document.querySelector('#locationBar')?.parentElement;
+  // FIXED: First check if we already have a location distribution section
+  let container = document.getElementById('locationDistributionSection');
   
-  // If not found, create a new container or find an appropriate parent
+  // If we don't have the section, create it
   if (!container) {
-    // Look for any existing chart container or create one
-    container = document.querySelector('.grid.grid-cols-1.lg\\:grid-cols-3.gap-6.mb-8');
-    if (container) {
-      // Add a new full-width section after the charts
-      const newSection = document.createElement('div');
-      newSection.className = 'bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-8 col-span-full';
-      newSection.id = 'locationDistributionSection';
-      container.parentElement.insertBefore(newSection, container.nextSibling);
-      container = newSection;
+    // Try to find the old canvas container first
+    let parentContainer = document.querySelector('#locationBar')?.parentElement;
+    
+    // If not found, find an appropriate parent
+    if (!parentContainer) {
+      parentContainer = document.querySelector('.grid.grid-cols-1.lg\\:grid-cols-3.gap-6.mb-8');
+      if (parentContainer) {
+        // Add a new full-width section after the charts
+        const newSection = document.createElement('div');
+        newSection.className = 'bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-8 col-span-full';
+        newSection.id = 'locationDistributionSection';
+        parentContainer.parentElement.insertBefore(newSection, parentContainer.nextSibling);
+        container = newSection;
+      } else {
+        console.error('Could not find suitable container for location distribution');
+        return;
+      }
     } else {
-      console.error('Could not find suitable container for location distribution');
-      return;
+      // Use existing parent container
+      parentContainer.id = 'locationDistributionSection';
+      container = parentContainer;
     }
   }
   
-  // Replace the canvas with a more flexible container
+  // FIXED: Always update the innerHTML of the EXISTING container
   container.innerHTML = `
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Inventory Distribution</h3>
