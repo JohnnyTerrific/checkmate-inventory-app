@@ -1038,6 +1038,8 @@ async function showChargerListForLocation(loc, inventory) {
 document.addEventListener('DOMContentLoaded', () => {
   if (document.body.dataset.page === "dashboard") {
     waitForMainContent(async () => {
+      showLoadingScreen();
+      updateLoadingProgress('Checking permissions...');
       // Check permissions
       const canViewDashboard = await can('viewDashboard');
       if (!canViewDashboard) {
@@ -1052,69 +1054,159 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
+      updateLoadingProgress('Injecting dashboard layout...');
       injectDashboardPage();
+      
+      updateLoadingProgress('Loading inventory data...');
       const inventory = await loadInventory();
+      
+      updateLoadingProgress('Loading shipments...');
       const shipments = await loadShipments();
+      
+      updateLoadingProgress('Calculating statistics...');
       const stats = await getDashboardStats(inventory, shipments);
       
+      updateLoadingProgress('Rendering components...');
       await renderStatCards(stats, inventory);
       renderShipmentCountdown(stats.nextShipment);
       await renderAgingAlerts(stats, inventory);
       
-      // FIXED: Store original data for reset functionality
-      renderStatusDonut(stats.byStatus);
-      if (window.statusChart) {
-        window.statusChart.originalByStatus = stats.byStatus;
-      }
-      
-      renderLostMeter(stats, inventory);
-      await renderLocationStackedBar(getLocationCounts(inventory), inventory);
-      
-      // Add refresh functionality
-      document.getElementById('refreshDashboard').addEventListener('click', async () => {
-        await refreshDashboard();
+            // FIXED: Store original data for reset functionality
+            renderStatusDonut(stats.byStatus);
+            if (window.statusChart) {
+              window.statusChart.originalByStatus = stats.byStatus;
+            }
+            
+            renderLostMeter(stats, inventory);
+            await renderLocationStackedBar(getLocationCounts(inventory), inventory);
+            
+            updateLoadingProgress('Setting up event handlers...');
+            // Add refresh functionality
+            document.getElementById('refreshDashboard').addEventListener('click', async () => {
+              await refreshDashboard();
+            });
+            
+            // Update last updated time
+            document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+            
+            updateLoadingProgress('Dashboard ready!');
+            
+            // Hide loading screen after a brief delay
+            setTimeout(() => {
+              hideLoadingScreen();
+            }, 500);
+          });
+        }
       });
-      
-      // Update last updated time
-      document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
-    });
-  }
-});
 
-async function refreshDashboard() {
-  const refreshBtn = document.getElementById('refreshDashboard');
-  refreshBtn.disabled = true;
-  refreshBtn.innerHTML = `
-    <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-    </svg>
-    Refreshing...
+      async function refreshDashboard() {
+        showLoadingScreen();
+        updateLoadingProgress('Refreshing data...');
+        
+        const refreshBtn = document.getElementById('refreshDashboard');
+        refreshBtn.disabled = true;
+        refreshBtn.innerHTML = `
+          <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          Refreshing...
+        `;
+        
+        try {
+          updateLoadingProgress('Loading inventory...');
+          const inventory = await loadInventory();
+          
+          updateLoadingProgress('Loading shipments...');
+          const shipments = await loadShipments();
+          
+          updateLoadingProgress('Calculating stats...');
+          const stats = await getDashboardStats(inventory, shipments);
+          
+          updateLoadingProgress('Updating dashboard...');
+          await renderStatCards(stats, inventory);
+          renderShipmentCountdown(stats.nextShipment);
+          await renderAgingAlerts(stats, inventory);
+          renderStatusDonut(stats.byStatus);
+          renderLostMeter(stats, inventory);
+          await renderLocationStackedBar(getLocationCounts(inventory), inventory);
+          
+          document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+          
+          updateLoadingProgress('Refresh complete!');
+          showToast('Dashboard refreshed successfully', 'green');
+          
+          setTimeout(() => {
+            hideLoadingScreen();
+          }, 500);
+        } catch (error) {
+          console.error('Error refreshing dashboard:', error);
+          hideLoadingScreen();
+          showToast('Failed to refresh dashboard', 'red');
+        } finally {
+          refreshBtn.disabled = false;
+          refreshBtn.innerHTML = `
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            Refresh
+          `;
+        }
+      }
+
+
+function showLoadingScreen() {
+  const existingLoader = document.getElementById('dashboardLoadingScreen');
+  if (existingLoader) {
+    existingLoader.remove();
+  }
+
+  // Create loading screen HTML
+  const loadingHTML = `
+    <div id="dashboardLoadingScreen" class="fixed inset-0 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 flex items-center justify-center z-50">
+      <div class="text-center">
+        <!-- Pulsating Logo -->
+        <div class="loading-pulse mb-8">
+          <div class="w-24 h-24 mx-auto bg-white rounded-2xl flex items-center justify-center shadow-2xl">
+            <svg class="w-16 h-16 text-purple-600" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+          </div>
+        </div>
+        
+        <!-- Loading Text -->
+        <h2 class="text-3xl font-bold text-white mb-4">CheckMate</h2>
+        <p class="text-purple-200 text-lg mb-8">Loading Dashboard</p>
+        
+        <!-- Loading Dots -->
+        <div class="flex justify-center space-x-2">
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+        </div>
+        
+        <!-- Progress Text -->
+        <p id="dashboardLoadingProgress" class="text-purple-300 mt-6 text-sm">Initializing...</p>
+      </div>
+    </div>
   `;
-  
-  try {
-    const inventory = await loadInventory();
-    const shipments = await loadShipments();
-    const stats = await getDashboardStats(inventory, shipments);
-    
-    await renderStatCards(stats, inventory);
-    renderShipmentCountdown(stats.nextShipment);
-    await renderAgingAlerts(stats, inventory);
-    renderStatusDonut(stats.byStatus);
-    renderLostMeter(stats, inventory);
-    await renderLocationStackedBar(getLocationCounts(inventory), inventory);
-    
-    document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
-    showToast('Dashboard refreshed successfully', 'green');
-  } catch (error) {
-    console.error('Error refreshing dashboard:', error);
-    showToast('Failed to refresh dashboard', 'red');
-  } finally {
-    refreshBtn.disabled = false;
-    refreshBtn.innerHTML = `
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-      </svg>
-      Refresh
-    `;
+
+  document.body.insertAdjacentHTML('beforeend', loadingHTML);
+}
+
+function hideLoadingScreen() {
+  const loadingScreen = document.getElementById('dashboardLoadingScreen');
+  if (loadingScreen) {
+    loadingScreen.style.opacity = '0';
+    loadingScreen.style.transition = 'opacity 0.5s ease-out';
+    setTimeout(() => {
+      loadingScreen.remove();
+    }, 500);
+  }
+}
+
+function updateLoadingProgress(message) {
+  const progressElement = document.getElementById('dashboardLoadingProgress');
+  if (progressElement) {
+    progressElement.textContent = message;
   }
 }
