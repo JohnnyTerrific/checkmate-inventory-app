@@ -607,10 +607,11 @@ renderInventoryTable(document.getElementById('main-content'));
         <path d="M12 8v8m4-4H8" stroke="white" stroke-width="2" stroke-linecap="round"/>
       </svg>
     </button>
-    <dialog id="addItemDialog" class="rounded-xl p-4"></dialog>
-    <dialog id="actionDialog" class="rounded-xl p-4"></dialog>
-    <dialog id="shipmentDialog" class="rounded-xl p-4"></dialog>
-    <dialog id="globalSearchDialog" class="rounded-xl p-4"></dialog>
+      <dialog id="addItemDialog" class="rounded-xl p-4"></dialog>
+      <dialog id="actionDialog" class="rounded-xl p-4"></dialog>
+      <dialog id="shipmentDialog" class="rounded-xl p-4"></dialog>
+      <dialog id="globalSearchDialog" class="rounded-xl p-4"></dialog>
+      <dialog id="barcodeScanDialog" class="rounded-xl p-4"></dialog>
   `;
   document.body.insertAdjacentHTML('beforeend', fabHTML);
 
@@ -1220,7 +1221,7 @@ if (selectAll) {
   }
 
   function ensureDialogs() {
-    ['addItemDialog', 'actionDialog', 'shipmentDialog', 'globalSearchDialog', 'moveDialog', 'editDialog'].forEach(id => {
+    ['addItemDialog', 'actionDialog', 'shipmentDialog', 'globalSearchDialog', 'moveDialog', 'editDialog', 'barcodeScanDialog'].forEach(id => {
       if (!document.getElementById(id)) {
         const dialog = document.createElement('dialog');
         dialog.id = id;
