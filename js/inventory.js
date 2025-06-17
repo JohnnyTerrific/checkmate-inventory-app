@@ -18,6 +18,15 @@ function shouldUseMobileLayout() {
   return window.innerWidth < 900 || ('ontouchstart' in window);
 }
 
+function escapeForHTML(obj) {
+  return JSON.stringify(obj)
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")      // Regular apostrophe
+    .replace(/'/g, "&#8217;")    // Hebrew geresh (וינצ'י)
+    .replace(/'/g, "&#8216;")    // Left single quote
+    .replace(/\\/g, "\\\\");
+}
+
 async function isAdmin() {
   return await can('inventoryCrud') && await can('settings');
 }
@@ -1098,10 +1107,10 @@ async function renderTableRows() {
         <td class="p-2 border-b text-center relative table-dot-menu">
           <button class="px-2 py-1 text-lg font-bold" onclick="event.stopPropagation();toggleRowMenu(${idx})">⋮</button>
           <div class="table-dot-menu-content" id="row-menu-${idx}">
-            <button onclick='openDetailsDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})'>Details</button>
-            <button onclick='openMoveDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})'>Move</button>
-            <button onclick='openStatusDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})'>Change Status</button>
-            <button onclick='openEditDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})'>Edit</button>
+            <button onclick="openDetailsDialog(${escapeForHTML(unit)})">Details</button>
+            <button onclick="openMoveDialog(${escapeForHTML(unit)})">Move</button>
+            <button onclick="openStatusDialog(${escapeForHTML(unit)})">Change Status</button>
+            <button onclick="openEditDialog(${escapeForHTML(unit)})">Edit</button>
             ${canDelete ? `<button class="delete" onclick='deleteUnit("${unit.chargerId}")'>Delete</button>` : ""}
           </div>
         </td>
@@ -1373,13 +1382,13 @@ searchInput.oninput = debounce((e) => {
           <div class="text-xs text-gray-400 truncate">${unit.model || unit.product || ""}${unit.chargerSerial ? " • " + unit.chargerSerial : ""}</div>
           ${unit.notes ? `<div class="text-xs text-blue-600 dark:text-blue-400 truncate italic">"${unit.notes}"</div>` : ''}
         </div>
-        <button class="ml-2 text-gray-400 hover:text-purple-600 transition-all" onclick='window.openDetailsDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})' title="View Details">
+        <button class="ml-2 text-gray-400 hover:text-purple-600 transition-all" onclick="window.openDetailsDialog(${escapeForHTML(unit)})" title="View Details">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path d="M1.5 12s3.5-7 10.5-7 10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12Z" stroke-linecap="round" stroke-linejoin="round"/>
             <circle cx="12" cy="12" r="3.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
-        <button class="ml-1 text-gray-400 hover:text-green-600 transition-all" onclick='window.openMoveDialog(${JSON.stringify(unit).replace(/"/g,"&quot;")})' title="Move Unit">
+        <button class="ml-1 text-gray-400 hover:text-green-600 transition-all" onclick="window.openMoveDialog(${escapeForHTML(unit)})" title="Move Unit">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path d="M3 12h18m0 0l-4-4m4 4l-4 4" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M3 6h18M3 18h18" stroke-linecap="round" stroke-linejoin="round"/>
