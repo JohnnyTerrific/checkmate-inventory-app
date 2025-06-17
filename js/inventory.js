@@ -18,13 +18,17 @@ function shouldUseMobileLayout() {
   return window.innerWidth < 900 || ('ontouchstart' in window);
 }
 
-function escapeForHTML(obj) {
-  return JSON.stringify(obj)
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;")      // Regular apostrophe
-    .replace(/'/g, "&#8217;")    // Hebrew geresh (וינצ'י)
-    .replace(/'/g, "&#8216;")    // Left single quote
-    .replace(/\\/g, "\\\\");
+function storeUnitData(unit, idx) {
+  // Store unit data in a global map with a unique key
+  if (!window._unitDataMap) window._unitDataMap = new Map();
+  const key = `unit_${idx}_${unit.chargerId}`;
+  window._unitDataMap.set(key, unit);
+  return key;
+}
+
+function getUnitData(key) {
+  if (!window._unitDataMap) return null;
+  return window._unitDataMap.get(key);
 }
 
 async function isAdmin() {
@@ -1035,39 +1039,42 @@ async function renderTableRows() {
   if (!searchInput || !tbody) return;
   const q = searchInput.value.toLowerCase();
     
-      let filtered = window.inventory;
-      
-      // Apply search filter
-      if (q) {
-        filtered = filtered.filter(i => {
-          const allFields = [
-            i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status,
-            i.location, i.notes, i.lastAction, i.addedBy, i.invoiceNumber
-          ];
-          return allFields.some(field => (field || '').toLowerCase().includes(q));
-        });
-      }
-      
-      // Apply status filter (NEW MULTI-SELECT LOGIC)
-      if (window.inventoryFilters?.selectedStatuses.size > 0) {
-        filtered = filtered.filter(i => window.inventoryFilters.selectedStatuses.has(i.status));
-      }
-      
-      // Apply location filter (NEW MULTI-SELECT LOGIC)
-      if (window.inventoryFilters?.selectedLocations.size > 0) {
-        filtered = filtered.filter(i => window.inventoryFilters.selectedLocations.has(i.location));
-      }
-    
-      const pageSize = window.inventoryPageSize;
-      const page = window.inventoryPage;
-      const startIdx = (page - 1) * pageSize;
-      const endIdx = startIdx + pageSize;
-      const paginated = filtered.slice(startIdx, endIdx);
+  let filtered = window.inventory;
   
-    // Only keep selectedUnits that are visible in the filtered list
-    window.selectedUnits = window.selectedUnits.filter(id => window.inventory.some(i => i.chargerId === id));
-    // Render table rows
-    tbody.innerHTML = paginated.map((unit, idx) => `
+  // Apply search filter
+  if (q) {
+    filtered = filtered.filter(i => {
+      const allFields = [
+        i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status,
+        i.location, i.notes, i.lastAction, i.addedBy, i.invoiceNumber
+      ];
+      return allFields.some(field => (field || '').toLowerCase().includes(q));
+    });
+  }
+  
+  // Apply status filter (NEW MULTI-SELECT LOGIC)
+  if (window.inventoryFilters?.selectedStatuses.size > 0) {
+    filtered = filtered.filter(i => window.inventoryFilters.selectedStatuses.has(i.status));
+  }
+  
+  // Apply location filter (NEW MULTI-SELECT LOGIC)
+  if (window.inventoryFilters?.selectedLocations.size > 0) {
+    filtered = filtered.filter(i => window.inventoryFilters.selectedLocations.has(i.location));
+  }
+
+  const pageSize = window.inventoryPageSize;
+  const page = window.inventoryPage;
+  const startIdx = (page - 1) * pageSize;
+  const endIdx = startIdx + pageSize;
+  const paginated = filtered.slice(startIdx, endIdx);
+
+  // Only keep selectedUnits that are visible in the filtered list
+  window.selectedUnits = window.selectedUnits.filter(id => window.inventory.some(i => i.chargerId === id));
+  
+  // Render table rows
+  tbody.innerHTML = paginated.map((unit, idx) => {
+    const unitKey = storeUnitData(unit, idx);
+    return `
     <tr class="inv-row${window.selectedUnits.includes(unit.chargerId) ? ' selected' : ''}" data-idx="${idx}" data-id="${unit.chargerId}">
         <td class="p-2 border-b text-center">
           <input type="checkbox" data-chargerid="${unit.chargerId}" ${window.selectedUnits.includes(unit.chargerId) ? "checked" : ""}>
@@ -1102,22 +1109,22 @@ async function renderTableRows() {
             "
           >${unit.location}</span>
         </td>
-        <td class="p-2 border-b table-cell text-xs text-gray-600 max-w-32 truncate" title="${unit.notes || ''}">${unit.notes || '-'}</td>
+        <td class="p-2 border-b table-cell text-xs text-gray-600 max-w-32 truncate" title="${(unit.notes || '').replace(/"/g, '&quot;')}">${unit.notes || '-'}</td>
         <td class="p-2 border-b table-cell">${new Date(unit.lastAction).toLocaleString()}</td>
         <td class="p-2 border-b text-center relative table-dot-menu">
           <button class="px-2 py-1 text-lg font-bold" onclick="event.stopPropagation();toggleRowMenu(${idx})">⋮</button>
           <div class="table-dot-menu-content" id="row-menu-${idx}">
-            <button onclick="openDetailsDialog(${escapeForHTML(unit)})">Details</button>
-            <button onclick="openMoveDialog(${escapeForHTML(unit)})">Move</button>
-            <button onclick="openStatusDialog(${escapeForHTML(unit)})">Change Status</button>
-            <button onclick="openEditDialog(${escapeForHTML(unit)})">Edit</button>
+            <button onclick="openDetailsDialogSafe('${unitKey}')">Details</button>
+            <button onclick="openMoveDialogSafe('${unitKey}')">Move</button>
+            <button onclick="openStatusDialogSafe('${unitKey}')">Change Status</button>
+            <button onclick="openEditDialogSafe('${unitKey}')">Edit</button>
             ${canDelete ? `<button class="delete" onclick='deleteUnit("${unit.chargerId}")'>Delete</button>` : ""}
           </div>
         </td>
         </div>
       </td>
-    </tr>
-  `).join("");
+    </tr>`;
+  }).join("");
   
     // Menu logic
     tbody.querySelectorAll('.table-dot-menu > button').forEach((btn, idx) => {
@@ -1228,6 +1235,34 @@ if (selectAll) {
   
     renderBulkActionBar();
   }
+
+  window.openDetailsDialogSafe = function(unitKey) {
+    const unit = getUnitData(unitKey);
+    if (unit && typeof window.openDetailsDialog === 'function') {
+      window.openDetailsDialog(unit);
+    }
+  };
+  
+  window.openMoveDialogSafe = function(unitKey) {
+    const unit = getUnitData(unitKey);
+    if (unit && typeof window.openMoveDialog === 'function') {
+      window.openMoveDialog(unit);
+    }
+  };
+
+  window.openStatusDialogSafe = function(unitKey) {
+    const unit = getUnitData(unitKey);
+    if (unit && typeof window.openStatusDialog === 'function') {
+      window.openStatusDialog(unit);
+    }
+  };
+  
+  window.openEditDialogSafe = function(unitKey) {
+    const unit = getUnitData(unitKey);
+    if (unit && typeof window.openEditDialog === 'function') {
+      window.openEditDialog(unit);
+    }
+  };
 
   function ensureDialogs() {
     ['addItemDialog', 'actionDialog', 'shipmentDialog', 'globalSearchDialog', 'moveDialog', 'editDialog', 'barcodeScanDialog'].forEach(id => {
