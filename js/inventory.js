@@ -48,6 +48,37 @@ async function isSuperAdmin() {
   return (await getCurrentUserRole()) === 'SuperAdmin';
 }
 
+function getFilteredInventory() {
+  const main = document.getElementById('main-content');
+  const searchInput = main?.querySelector('#searchInput');
+  const q = searchInput?.value.toLowerCase() || '';
+  
+  let filtered = [...window.inventory];
+  
+  // Apply search filter
+  if (q) {
+    filtered = filtered.filter(i => {
+      const allFields = [
+        i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status,
+        i.location, i.notes, i.lastAction, i.addedBy, i.invoiceNumber
+      ];
+      return allFields.some(field => (field || '').toLowerCase().includes(q));
+    });
+  }
+  
+  // Apply status filter
+  if (window.inventoryFilters?.selectedStatuses.size > 0) {
+    filtered = filtered.filter(i => window.inventoryFilters.selectedStatuses.has(i.status));
+  }
+  
+  // Apply location filter
+  if (window.inventoryFilters?.selectedLocations.size > 0) {
+    filtered = filtered.filter(i => window.inventoryFilters.selectedLocations.has(i.location));
+  }
+  
+  return filtered;
+}
+
 // 1) Load entire inventory from Firestore
 export async function loadInventory() {
   const snapshot = await getDocs(collection(db, "inventory"));
@@ -3001,7 +3032,10 @@ window.openAssignContractorDialog = openAssignContractorDialog;
 window.downloadInventoryCSV = function() {
   console.log('downloadInventoryCSV called');
   try {
-    const items = [...window.inventory];
+    const items = getFilteredInventory(); // Changed from [...window.inventory]
+    const totalCount = window.inventory.length;
+    const filteredCount = items.length;
+    
     const header = ["Charger ID", "Serial", "Status", "Location", "Last Action"];
     
     // Sanitize data to prevent CSV injection
@@ -3027,10 +3061,10 @@ window.downloadInventoryCSV = function() {
     let url = URL.createObjectURL(blob);
     let a = document.createElement("a");
     a.href = url;
-    a.download = `inventory_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `inventory_${filteredCount === totalCount ? 'all' : 'filtered'}_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    showToast('CSV downloaded successfully', 'green');
+    showToast(`CSV downloaded: ${filteredCount} of ${totalCount} items`, 'green');
   } catch (error) {
     console.error('CSV download error:', error);
     showToast('CSV download failed: ' + error.message, 'red');
@@ -3046,7 +3080,10 @@ window.downloadInventoryExcel = function() {
       return;
     }
     
-    const items = [...window.inventory];
+    const items = getFilteredInventory(); // Changed from [...window.inventory]
+    const totalCount = window.inventory.length;
+    const filteredCount = items.length;
+    
     if (!items.length) {
       showToast('No inventory data to export', 'yellow');
       return;
@@ -3077,8 +3114,8 @@ window.downloadInventoryExcel = function() {
     ws['!cols'] = colWidths;
     
     XLSX.utils.book_append_sheet(wb, ws, "Inventory");
-    XLSX.writeFile(wb, `inventory_${new Date().toISOString().split('T')[0]}.xlsx`);
-    showToast('Excel downloaded successfully', 'green');
+    XLSX.writeFile(wb, `inventory_${filteredCount === totalCount ? 'all' : 'filtered'}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    showToast(`Excel downloaded: ${filteredCount} of ${totalCount} items`, 'green');
   } catch (error) {
     console.error('Excel download error:', error);
     showToast('Excel download failed: ' + error.message, 'red');
