@@ -222,32 +222,76 @@ async function safeFirebaseOperation(operation, operationName) {
 }
 
 function validateInventoryItem(item) {
+  // Required fields check
   const required = ['chargerId', 'location', 'status'];
-  const missing = required.filter(field => !item[field] || item[field].trim() === '');
+  const missing = required.filter(field => !item[field] || String(item[field]).trim() === '');
   
   if (missing.length > 0) {
     throw new Error(`Missing required fields: ${missing.join(', ')}`);
   }
   
-  if (item.chargerId.length > 50) {
+  // Field length validations
+  if (item.chargerId && item.chargerId.length > 50) {
     throw new Error('Charger ID too long (max 50 characters)');
+  }
+  
+  if (item.chargerSerial && item.chargerSerial.length > 50) {
+    throw new Error('Charger Serial too long (max 50 characters)');
+  }
+  
+  if (item.simNumber && item.simNumber.length > 20) {
+    throw new Error('SIM Number too long (max 20 characters)');
+  }
+  
+  // Format validations
+  if (item.chargerId && !/^[a-zA-Z0-9\-_]+$/.test(item.chargerId)) {
+    throw new Error('Charger ID contains invalid characters (only letters, numbers, hyphens, and underscores allowed)');
+  }
+  
+  if (item.simNumber && item.simNumber.length > 0 && !/^\d+$/.test(item.simNumber)) {
+    throw new Error('SIM Number must contain only digits');
+  }
+  
+  // Business logic validations
+  if (item.status === 'Installed' && !item.location) {
+    throw new Error('Installed items must have a location');
   }
   
   return true;
 }
 
 function debounceSubmit(element, delay = 2000) {
+  if (!element) return false;
+  
   if (element.dataset.submitting === 'true') {
     showToast('Please wait, processing...', 'yellow');
     return false;
   }
   
+  // Visual feedback
+  const originalText = element.textContent;
+  element.textContent = 'Processing...';
+  element.disabled = true;
   element.dataset.submitting = 'true';
+  
   setTimeout(() => {
     element.dataset.submitting = 'false';
+    element.textContent = originalText;
+    element.disabled = false;
   }, delay);
   
   return true;
+}
+
+function escapeForHTML(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/\//g, '&#x2F;');
 }
 
 // 3) Load entire audit log from Firestore
@@ -259,7 +303,6 @@ export async function loadAuditLog() {
 }
 
 // 4) Save (append) an array of audit entries into Firestore
-// Replace the saveAuditLog function around line 220:
 export async function saveAuditLog(newEntries) {
   if (!newEntries || newEntries.length === 0) {
     console.warn('No audit entries to save');
@@ -306,42 +349,72 @@ window.inventoryPageSize = 30;
 
 const locationColors = {
   "Back Warehouse": { bg: "#f1f5ff", color: "#3b4252" },
-  "Technician/Contractor":    { bg: "#f0fdf4", color: "#166534" },
-  "Customer":       { bg: "#fef9c3", color: "#92400e" },
-  "Public":         { bg: "#fce7f3", color: "#8b5cf6" },
-  // Add others and sublocations as needed:
   "Back Warehouse - Container 1": { bg: "#def7ec", color: "#047857" },
-  "Back Warehouse - Container 2": { bg: "#fde2e4", color: "#b91c1c" }
-  // Fallback:
-  // ...
+  "Back Warehouse - Container 2": { bg: "#fde2e4", color: "#b91c1c" },
+  "Technician/Contractor": { bg: "#f0fdf4", color: "#166534" },
+  "Customer Stock": { bg: "#fef9c3", color: "#92400e" },
+  "Public Network Stock": { bg: "#fce7f3", color: "#8b5cf6" },
+  "Customer": { bg: "#fef9c3", color: "#92400e" },
+  "Public": { bg: "#fce7f3", color: "#8b5cf6" },
+  "Demo Site": { bg: "#e0f2fe", color: "#0369a1" },
+  "Service Center": { bg: "#fef3c7", color: "#d97706" }
 };
-function getLocationColor(loc) {
-  if (!loc) return { bg: "#f3f4f6", color: "#1f2937" };
-  let normalized = loc.trim();
-  // Exact match
-  if (locationColors[normalized]) return locationColors[normalized];
-  // Partial match (for sublocations)
-  for (let key in locationColors) {
-    if (normalized.startsWith(key)) return locationColors[key];
+
+function getLocationColor(location) {
+  if (!location) return { bg: "#f3f4f6", color: "#1f2937" };
+  
+  let normalized = location.trim();
+  
+  // Exact match first
+  if (locationColors[normalized]) {
+    return locationColors[normalized];
   }
+  
+  // Partial match for sublocations (e.g., "Back Warehouse - Container 3")
+  for (let key in locationColors) {
+    if (normalized.startsWith(key)) {
+      return locationColors[key];
+    }
+  }
+  
+  // Contractor/Technician locations (dynamic names)
+  if (normalized.includes('Contractor') || normalized.includes('Technician')) {
+    return { bg: "#f0fdf4", color: "#166534" };
+  }
+  
+  // Customer locations
+  if (normalized.includes('Customer')) {
+    return { bg: "#fef9c3", color: "#92400e" };
+  }
+  
+  // Public locations
+  if (normalized.includes('Public')) {
+    return { bg: "#fce7f3", color: "#8b5cf6" };
+  }
+  
+  // Default fallback
   return { bg: "#f3f4f6", color: "#1f2937" };
 }
 
-  const statusColors = {
-    "In Stock":      { bg: "#e0f7fa",    color: "#00838f" },
-    "Installed":     { bg: "#e1ffe6",    color: "#1b5e20" },
-    "Reserved":      { bg: "#fff9c4",    color: "#827717" },
-    "Faulty":        { bg: "#ffebee",    color: "#c62828" },
-    "RMA":           { bg: "#e1bee7",    color: "#6a1b9a" },
-    "Demo":          { bg: "#e3f2fd",    color: "#1565c0" },
-    "Loaner":        { bg: "#f3e5f5",    color: "#4527a0" },
-    "Decommissioned":{ bg: "#cfd8dc",    color: "#37474f" },
-    "Lost":          { bg: "#ffe0b2",    color: "#ef6c00" },
-    // Add or adjust as needed
-  };
-  function getStatusColor(status) {
-    return statusColors[status] || { bg: "#ececec", color: "#888" };
-  }
+const statusColors = {
+  "In Stock": { bg: "#e0f7fa", color: "#00838f" },
+  "Installed": { bg: "#e1ffe6", color: "#1b5e20" },
+  "Reserved": { bg: "#fff9c4", color: "#827717" },
+  "Faulty": { bg: "#ffebee", color: "#c62828" },
+  "RMA": { bg: "#e1bee7", color: "#6a1b9a" },
+  "Demo": { bg: "#e3f2fd", color: "#1565c0" },
+  "Loaner": { bg: "#f3e5f5", color: "#4527a0" },
+  "Decommissioned": { bg: "#cfd8dc", color: "#37474f" },
+  "Unknown": { bg: "#ffe0b2", color: "#ef6c00" },
+  "Shipped": { bg: "#e8f5e8", color: "#2e7d32" },
+  "Returned": { bg: "#fff3e0", color: "#f57c00" },
+  "Testing": { bg: "#f3e5f5", color: "#7b1fa2" }
+};
+
+function getStatusColor(status) {
+  if (!status) return { bg: "#f5f5f5", color: "#666666" };
+  return statusColors[status] || { bg: "#ececec", color: "#888888" };
+}
 
   function isContractorLocation(loc, contractorLocations, installedLocations) {
     if (!loc) return false;
@@ -608,9 +681,12 @@ renderInventoryTable(document.getElementById('main-content'));
   };
 
   async function injectInventoryFABs() {
+    // Check if user can manage inventory (for CRUD operations)
+    const canManage = await canManageInventory();
     const isSuper = await isSuperAdmin();
-    // Remove FABs if on mobile or not SuperAdmin
-    if (window.innerWidth < 640 || !isSuper) {
+    
+    // Remove FABs if on mobile or user can't manage inventory
+    if (window.innerWidth < 640 || !canManage) {
       ['addItemBtn', 'bulkAddBtn', 'addShipmentBtn'].forEach(id => {
         const btn = document.getElementById(id);
         if (btn) btn.remove();
@@ -626,88 +702,146 @@ renderInventoryTable(document.getElementById('main-content'));
     ) return;
   
     const fabHTML = `
-    <button id="addShipmentBtn"
-      class="fixed bottom-48 right-8 z-40 bg-green-600 hover:bg-green-700 text-white w-16 h-16 flex items-center justify-center rounded-full shadow-lg text-3xl transition">
-      <svg xmlns="http://www.w3.org/2000/svg" class="w-9 h-9" fill="none" viewBox="0 0 32 32" stroke="currentColor">
-        <rect x="10" y="10" width="12" height="6" rx="2" fill="#bbf7d0" stroke="white" stroke-width="2"/>
-        <rect x="13" y="6" width="6" height="4" rx="1" fill="#4ade80" stroke="white" stroke-width="2"/>
-        <path d="M4 22c2 3 6 5 12 5s10-2 12-5l-12-4-12 4z" fill="#22d3ee" stroke="white" stroke-width="2"/>
-        <path d="M8 25c1 1 3 2 8 2s7-1 8-2" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
-        <circle cx="16" cy="18" r="1.5" fill="white"/>
-      </svg>
-    </button>
-    <button id="bulkAddBtn"
-      class="fixed bottom-28 right-8 z-40 bg-blue-600 hover:bg-blue-700 text-white w-16 h-16 flex items-center justify-center rounded-full shadow-lg text-3xl transition">
-      <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <rect x="7" y="7" width="10" height="10" rx="2" fill="#3b82f6" stroke="white" stroke-width="2"/>
-        <rect x="3" y="3" width="10" height="10" rx="2" fill="#60a5fa" stroke="white" stroke-width="2" opacity="0.7"/>
-        <path d="M12 12v4m2-2h-4" stroke="white" stroke-width="2" stroke-linecap="round"/>
-      </svg>
-    </button>
-    <button id="addItemBtn"
-      class="fixed bottom-8 right-8 z-40 bg-purple-600 hover:bg-purple-700 text-white w-16 h-16 flex items-center justify-center rounded-full shadow-lg text-3xl transition">
-      <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <circle cx="12" cy="12" r="10" fill="#a78bfa" stroke="white" stroke-width="2"/>
-        <path d="M12 8v8m4-4H8" stroke="white" stroke-width="2" stroke-linecap="round"/>
-      </svg>
-    </button>
+      <button id="addShipmentBtn"
+        class="fixed bottom-48 right-8 z-40 bg-green-600 hover:bg-green-700 text-white w-16 h-16 flex items-center justify-center rounded-full shadow-lg text-3xl transition">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-9 h-9" fill="none" viewBox="0 0 32 32" stroke="currentColor">
+          <rect x="10" y="10" width="12" height="6" rx="2" fill="#bbf7d0" stroke="white" stroke-width="2"/>
+          <rect x="13" y="6" width="6" height="4" rx="1" fill="#4ade80" stroke="white" stroke-width="2"/>
+          <path d="M4 22c2 3 6 5 12 5s10-2 12-5l-12-4-12 4z" fill="#22d3ee" stroke="white" stroke-width="2"/>
+          <path d="M8 25c1 1 3 2 8 2s7-1 8-2" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="16" cy="18" r="1.5" fill="white"/>
+        </svg>
+      </button>
+      <button id="bulkAddBtn"
+        class="fixed bottom-28 right-8 z-40 bg-blue-600 hover:bg-blue-700 text-white w-16 h-16 flex items-center justify-center rounded-full shadow-lg text-3xl transition">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <rect x="7" y="7" width="10" height="10" rx="2" fill="#3b82f6" stroke="white" stroke-width="2"/>
+          <rect x="3" y="3" width="10" height="10" rx="2" fill="#60a5fa" stroke="white" stroke-width="2" opacity="0.7"/>
+          <path d="M12 12v4m2-2h-4" stroke="white" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button id="addItemBtn"
+        class="fixed bottom-8 right-8 z-40 bg-purple-600 hover:bg-purple-700 text-white w-16 h-16 flex items-center justify-center rounded-full shadow-lg text-3xl transition">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <circle cx="12" cy="12" r="10" fill="#a78bfa" stroke="white" stroke-width="2"/>
+          <path d="M12 8v8m4-4H8" stroke="white" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
       <dialog id="addItemDialog" class="rounded-xl p-4"></dialog>
       <dialog id="actionDialog" class="rounded-xl p-4"></dialog>
       <dialog id="shipmentDialog" class="rounded-xl p-4"></dialog>
       <dialog id="globalSearchDialog" class="rounded-xl p-4"></dialog>
       <dialog id="barcodeScanDialog" class="rounded-xl p-4"></dialog>
-  `;
-  document.body.insertAdjacentHTML('beforeend', fabHTML);
-
-  const addItemBtn = document.getElementById("addItemBtn");
-  const bulkAddBtn = document.getElementById("bulkAddBtn");
-  const addShipmentBtn = document.getElementById("addShipmentBtn");
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', fabHTML);
   
-  if (addItemBtn) addItemBtn.onclick = () => showAddItemDialog(); // Add arrow function
-  if (bulkAddBtn) bulkAddBtn.onclick = window.openBulkAddDialog;
-  if (addShipmentBtn) addShipmentBtn.onclick = window.openCreateShipmentDialog;
-
-  if (!document.getElementById('barcodeScanDialog')) {
-    const scanDialog = document.createElement('dialog');
-    scanDialog.id = 'barcodeScanDialog';
-    scanDialog.className = 'rounded-xl p-4';
-    document.body.appendChild(scanDialog);
+    const addItemBtn = document.getElementById("addItemBtn");
+    const bulkAddBtn = document.getElementById("bulkAddBtn");
+    const addShipmentBtn = document.getElementById("addShipmentBtn");
+    
+    if (addItemBtn) addItemBtn.onclick = () => showAddItemDialog();
+    if (bulkAddBtn) bulkAddBtn.onclick = window.openBulkAddDialog;
+    if (addShipmentBtn) addShipmentBtn.onclick = window.openCreateShipmentDialog;
+  
+    if (!document.getElementById('barcodeScanDialog')) {
+      const scanDialog = document.createElement('dialog');
+      scanDialog.id = 'barcodeScanDialog';
+      scanDialog.className = 'rounded-xl p-4';
+      document.body.appendChild(scanDialog);
+    }
   }
-}
   
 // Initial load
 document.addEventListener('DOMContentLoaded', async () => {
   if (document.body.dataset.page === "inventory") {
     window.isInitialLoad = true;
     
-    // 1. Load data first
-    window.inventory = await loadInventory();
-    
-    // 2. Render UI components
-    injectInventoryFABs();
-    renderInventoryTable(document.getElementById('main-content'));
+    try {
+      // Show loading screen for inventory
+      showInventoryLoadingScreen();
+      
+      updateInventoryLoadingProgress('Initializing Firebase connection...');
+      
+      // REMOVED: Permission check for viewing inventory - all users can view
+      // The inventory page should be accessible to everyone
+      
+      // Wait for Firebase to be ready
+      let retryCount = 0;
+      while (!window.db && retryCount < 50) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        retryCount++;
+      }
 
-    // 3. Force resize event for layout adjustments
-    window.dispatchEvent(new Event('resize'));
+      if (!window.db) {
+        throw new Error('Firebase not initialized after 5 seconds');
+      }
 
-    // 4. Initialize all event handlers and listeners in proper sequence
-    setTimeout(() => {
-      // Attach download handlers explicitly AFTER DOM is stable
-      attachDownloadHandlers();
+      updateInventoryLoadingProgress('Loading inventory data...');
+      console.log('Loading inventory data...');
+      window.inventory = await loadInventory();
+      console.log('Inventory loaded:', window.inventory.length, 'items');
       
-      // Initialize search functionality
-      initializeInventorySearch();
-      
-      // Attach hover legends
-      attachHoverLegends();
-      
-      // Handle pending actions
-      handlePendingActions();
-      
-      // Mark initial load complete and start real-time updates
-      window.isInitialLoad = false;
-      listenToInventoryUpdates();
-    }, 150); // Slightly reduced timeout but still safe
+      updateInventoryLoadingProgress('Setting up user interface...');
+      // Render UI components
+      await injectInventoryFABs();
+      renderInventoryTable(document.getElementById('main-content'));
+
+      // Force resize event for layout adjustments
+      window.dispatchEvent(new Event('resize'));
+
+      updateInventoryLoadingProgress('Initializing features...');
+      // Initialize all event handlers and listeners in proper sequence
+      setTimeout(() => {
+        // Attach download handlers explicitly AFTER DOM is stable
+        attachDownloadHandlers();
+        
+        // Initialize search functionality
+        initializeInventorySearch();
+        
+        // Attach hover legends
+        attachHoverLegends();
+        
+        // Handle pending actions
+        handlePendingActions();
+        
+        updateInventoryLoadingProgress('Starting real-time updates...');
+        
+        // Mark initial load complete and start real-time updates
+        window.isInitialLoad = false;
+        listenToInventoryUpdates();
+        
+        updateInventoryLoadingProgress('Inventory ready!');
+        
+        // Hide loading screen
+        setTimeout(() => {
+          hideInventoryLoadingScreen();
+        }, 500);
+      }, 150);
+
+    } catch (error) {
+      console.error('Failed to load inventory:', error);
+      hideInventoryLoadingScreen();
+      const mainContent = document.getElementById('main-content');
+      if (mainContent) {
+        mainContent.innerHTML = `
+          <div class="flex items-center justify-center h-screen">
+            <div class="text-center">
+              <div class="text-red-500 mb-4">
+                <svg class="w-16 h-16 mx-auto" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+                </svg>
+              </div>
+              <p class="text-red-600 mb-4">Failed to load inventory</p>
+              <button onclick="location.reload()" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">
+                Retry
+              </button>
+            </div>
+          </div>
+        `;
+      }
+      showToast('Failed to load inventory data. Please refresh the page.', 'red');
+    }
   }
 });
 
@@ -1307,112 +1441,248 @@ if (selectAll) {
   }
 
 
-  function renderInventoryMobile(main, items) {
-    ensureDialogs();
-    main.innerHTML = `
-      <div class="sticky top-0 z-20 bg-white dark:bg-gray-900 p-3 flex gap-2 items-center shadow">
-        <input id="searchInput" type="text" placeholder="Search" class="flex-1 border rounded px-3 py-2 bg-gray-50 dark:bg-gray-800" />
-        <button id="scanBtn" class="bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center" title="Scan Barcode">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <rect x="3" y="7" width="18" height="13" rx="2" />
-            <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            <circle cx="12" cy="13.5" r="3.5" />
-          </svg>
-        </button>
-      </div>
-      <div id="mobileInventoryList" class="flex flex-col gap-3 mt-3 px-3"></div>
-      <button id="fabAdd" class="fixed bottom-6 right-6 bg-purple-600 text-white rounded-full w-16 h-16 flex items-center justify-center shadow-lg text-3xl z-50">
-        <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="10" stroke="white"/>
-          <path d="M12 8v8m4-4H8" stroke="white"/>
+  // Replace the mobile search logic in renderInventoryMobile function (around line 1400)
+
+function renderInventoryMobile(main, items) {
+  ensureDialogs();
+  main.innerHTML = `
+    <div class="sticky top-0 z-20 bg-white dark:bg-gray-900 p-3 flex gap-2 items-center shadow">
+      <input id="searchInput" type="text" placeholder="Search anything..." class="flex-1 border rounded px-3 py-2 bg-gray-50 dark:bg-gray-800" />
+      <button id="scanBtn" class="bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center" title="Scan Barcode">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <rect x="3" y="7" width="18" height="13" rx="2" />
+          <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          <circle cx="12" cy="13.5" r="3.5" />
         </svg>
       </button>
-    `;
+    </div>
+    <div id="mobileInventoryList" class="flex flex-col gap-3 mt-3 px-3 pb-32"></div>
+    <button id="fabAdd" class="fixed bottom-24 right-6 bg-purple-600 text-white rounded-full w-16 h-16 flex items-center justify-center shadow-lg text-3xl z-50">
+      <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="10" stroke="white"/>
+        <path d="M12 8v8m4-4H8" stroke="white"/>
+      </svg>
+    </button>
+  `;
+
+  // Ensure all dialogs exist after clearing main content
+  ensureDialogs();
   
-    // Ensure all dialogs exist after clearing main content
-    ensureDialogs();
+  const list = main.querySelector('#mobileInventoryList');
+  const searchInput = main.querySelector('#searchInput');
+  
+  // Initialize with all items
+  renderMobileInventoryList(list, items);
+
+  // Enhanced mobile search with same logic as desktop
+  searchInput.oninput = debounce((e) => {
+    const q = e.target.value.toLowerCase();
     
-    const list = main.querySelector('#mobileInventoryList');
-    renderMobileInventoryList(list, items);
-  
-    // Fix search functionality for mobile
-    const searchInput = main.querySelector('#searchInput');
-searchInput.oninput = debounce((e) => {
-  const q = e.target.value.toLowerCase();
-  const filtered = window.inventory.filter(i =>
-    [i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status, i.location, i.notes]
-      .some(f => (f || '').toLowerCase().includes(q))
-  );
-  renderMobileInventoryList(list, filtered);
-}, 250);
-  
-    // Fix scan button logic
-    main.querySelector('#scanBtn').onclick = () => {
-      if (typeof window.openBarcodeScanner === 'function') {
-        window.openBarcodeScanner(result => {
-          if (result) {
-            const found = window.inventory.find(i => i.chargerSerial === result || i.chargerId === result);
-            if (found) {
-              // Open the mobile search dialog instead of details
-              openMobileSearchDialog(found);
-            } else {
-              showToast("Not found", "red");
-            }
+    // Use the same filtering logic as desktop
+    let filtered = [...window.inventory];
+    
+    if (q) {
+      filtered = filtered.filter(i => {
+        const allFields = [
+          i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status,
+          i.location, i.notes, i.lastAction, i.addedBy, i.invoiceNumber
+        ];
+        return allFields.some(field => (field || '').toLowerCase().includes(q));
+      });
+    }
+    
+    renderMobileInventoryList(list, filtered);
+    
+    // Show search feedback
+    if (q && filtered.length === 0) {
+      list.innerHTML = `
+        <div class="flex items-center justify-center h-32">
+          <div class="text-center">
+            <div class="text-gray-500 dark:text-gray-400">No results found for "${q}"</div>
+            <button onclick="document.getElementById('searchInput').value=''; document.getElementById('searchInput').dispatchEvent(new Event('input'))" 
+                    class="mt-2 text-blue-600 hover:text-blue-700">Clear search</button>
+          </div>
+        </div>
+      `;
+    } else if (q && filtered.length > 0) {
+      // Add search result count at the top
+      list.insertAdjacentHTML('afterbegin', `
+        <div class="bg-blue-50 dark:bg-blue-900 rounded-lg p-3 mb-3">
+          <div class="text-sm text-blue-700 dark:text-blue-300">
+            Found ${filtered.length} result${filtered.length !== 1 ? 's' : ''} for "${q}"
+            <button onclick="document.getElementById('searchInput').value=''; document.getElementById('searchInput').dispatchEvent(new Event('input'))" 
+                    class="ml-2 text-blue-600 hover:text-blue-700 underline">Clear</button>
+          </div>
+        </div>
+      `);
+    }
+  }, 250);
+
+  // Enhanced scan button logic
+  main.querySelector('#scanBtn').onclick = () => {
+    if (typeof window.openBarcodeScanner === 'function') {
+      window.openBarcodeScanner(result => {
+        if (result) {
+          // Search for the scanned result
+          const found = window.inventory.find(i => 
+            i.chargerSerial === result || 
+            i.chargerId === result ||
+            i.simNumber === result
+          );
+          
+          if (found) {
+            // Update search input to show the result
+            searchInput.value = result;
+            searchInput.dispatchEvent(new Event('input'));
+            // Open the mobile search dialog
+            openMobileSearchDialog(found);
+          } else {
+            showToast(`No unit found with barcode: ${result}`, "red");
           }
-        });
-      }
-    };
-  
-    // FAB add logic
-    main.querySelector('#fabAdd').onclick = () => {
+        }
+      });
+    } else {
+      showToast("Barcode scanner not available", "red");
+    }
+  };
+
+  // FAB add logic with permission check
+  main.querySelector('#fabAdd').onclick = async () => {
+    if (await canManageInventory()) {
       if (typeof showAddItemDialog === 'function') {
         showAddItemDialog();
+      } else {
+        showToast("Add function not available", "red");
       }
-    };
-  }
+    } else {
+      showToast("You don't have permission to add inventory", "red");
+    }
+  };
+}
 
-  function openMobileSearchDialog(unit) {
-    const dialog = document.getElementById('actionDialog');
-    
-    // Store unit data globally for the dialog buttons
-    window._tempDialogUnit = unit;
-    
-    dialog.innerHTML = `
-      <div class="w-full max-w-sm mx-auto">
-        <div class="text-xl font-bold mb-4 text-purple-700 dark:text-purple-300">Unit Found</div>
-        <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 mb-4">
-          <div class="font-bold text-lg">${unit.chargerId}</div>
-          <div class="text-sm text-gray-600 dark:text-gray-300">${unit.status} • ${unit.location}</div>
-          <div class="text-sm text-gray-400">${unit.model || unit.product || ""}${unit.chargerSerial ? " • " + unit.chargerSerial : ""}</div>
-        </div>
-        <div class="flex flex-col gap-2">
-          <button type="button" id="editUnitBtn" class="w-full bg-purple-600 text-white py-2 px-4 rounded">Edit Unit</button>
-          <button type="button" id="moveUnitBtn" class="w-full bg-blue-600 text-white py-2 px-4 rounded">Move Unit</button>
-          <button type="button" id="viewDetailsBtn" class="w-full bg-green-600 text-white py-2 px-4 rounded">View Details</button>
-          <button type="button" id="closeDialogBtn" class="w-full bg-gray-300 dark:bg-gray-700 py-2 px-4 rounded">Close</button>
-        </div>
+  // Replace the openMobileSearchDialog function (around line 1600)
+
+function openMobileSearchDialog(unit) {
+  const dialog = document.getElementById('actionDialog');
+  
+  // Store unit data globally for the dialog buttons
+  window._tempDialogUnit = unit;
+  
+  const statusColor = getStatusColor(unit.status);
+  const locationColor = getLocationColor(unit.location);
+  
+  dialog.innerHTML = `
+    <div class="w-full max-w-sm mx-auto">
+      <div class="text-xl font-bold mb-4 text-purple-700 dark:text-purple-300 flex items-center gap-2">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/>
+        </svg>
+        Unit Found
       </div>
-    `;
-    
+      
+      <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 mb-4 space-y-3">
+        <div class="font-bold text-lg text-gray-900 dark:text-gray-100">${escapeForHTML(unit.chargerId)}</div>
+        
+        <div class="flex gap-2">
+          <span class="inline-block px-3 py-1 text-xs font-semibold rounded-full shadow-sm"
+                style="background-color: ${statusColor.bg}; color: ${statusColor.color}; border: 1px solid ${statusColor.color}20;">
+            ${escapeForHTML(unit.status)}
+          </span>
+          <span class="inline-block px-3 py-1 text-xs font-semibold rounded-full shadow-sm"
+                style="background-color: ${locationColor.bg}; color: ${locationColor.color}; border: 1px solid ${locationColor.color}20;">
+            ${escapeForHTML(unit.location)}
+          </span>
+        </div>
+        
+        <div class="grid grid-cols-2 gap-2 text-sm">
+          <div>
+            <span class="text-gray-500 dark:text-gray-400">Model:</span>
+            <div class="text-gray-900 dark:text-gray-100 truncate" title="${escapeForHTML(unit.model || unit.product || '')}">
+              ${escapeForHTML(unit.model || unit.product || 'Unknown')}
+            </div>
+          </div>
+          <div>
+            <span class="text-gray-500 dark:text-gray-400">Serial:</span>
+            <div class="text-gray-900 dark:text-gray-100 truncate" title="${escapeForHTML(unit.chargerSerial || '')}">
+              ${unit.chargerSerial ? escapeForHTML(unit.chargerSerial) : '<span class="text-gray-400">Not set</span>'}
+            </div>
+          </div>
+        </div>
+        
+        ${unit.notes ? `
+          <div class="text-sm">
+            <span class="text-gray-500 dark:text-gray-400">Notes:</span>
+            <div class="text-gray-700 dark:text-gray-300 mt-1 line-clamp-2" title="${escapeForHTML(unit.notes)}">
+              ${escapeForHTML(unit.notes)}
+            </div>
+          </div>
+        ` : ''}
+      </div>
+      
+      <div class="flex flex-col gap-3">
+        <button type="button" id="viewDetailsBtn" class="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 px-4 rounded-lg font-medium transition-colors shadow-sm flex items-center justify-center gap-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+          </svg>
+          View Details
+        </button>
+        
+        <div class="grid grid-cols-2 gap-3">
+          <button type="button" id="moveUnitBtn" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg font-medium transition-colors shadow-sm flex items-center justify-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3"/>
+            </svg>
+            Move
+          </button>
+          <button type="button" id="editUnitBtn" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg font-medium transition-colors shadow-sm flex items-center justify-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+            </svg>
+            Edit
+          </button>
+        </div>
+        
+        <button type="button" id="closeDialogBtn" class="w-full bg-gray-300 dark:bg-gray-700 text-gray-700 dark:text-gray-300 py-2 px-4 rounded-lg font-medium transition-colors">
+          Close
+        </button>
+      </div>
+    </div>
+  `;
+  
   // Attach handlers after DOM creation
-  dialog.querySelector('#editUnitBtn').onclick = () => {
-    dialog.close();
-    if (typeof window.openEditDialog === 'function') {
-      window.openEditDialog(window._tempDialogUnit);
-    }
-  };
-  
-  dialog.querySelector('#moveUnitBtn').onclick = () => {
-    dialog.close();
-    if (typeof window.openMoveDialog === 'function') {
-      window.openMoveDialog(window._tempDialogUnit);
-    }
-  };
-  
   dialog.querySelector('#viewDetailsBtn').onclick = () => {
     dialog.close();
     if (typeof window.openDetailsDialog === 'function') {
       window.openDetailsDialog(window._tempDialogUnit);
+    } else {
+      showToast('Details function not available', 'red');
+    }
+  };
+  
+  dialog.querySelector('#moveUnitBtn').onclick = async () => {
+    if (await canManageInventory()) {
+      dialog.close();
+      if (typeof window.openMoveDialog === 'function') {
+        window.openMoveDialog(window._tempDialogUnit);
+      } else {
+        showToast('Move function not available', 'red');
+      }
+    } else {
+      showToast("You don't have permission to move inventory", "red");
+    }
+  };
+  
+  dialog.querySelector('#editUnitBtn').onclick = async () => {
+    if (await canManageInventory()) {
+      dialog.close();
+      if (typeof window.openEditDialog === 'function') {
+        window.openEditDialog(window._tempDialogUnit);
+      } else {
+        showToast('Edit function not available', 'red');
+      }
+    } else {
+      showToast("You don't have permission to edit inventory", "red");
     }
   };
   
@@ -1421,7 +1691,12 @@ searchInput.oninput = debounce((e) => {
   };
   
   dialog.showModal();
-  }
+  
+  // Clear temp data when dialog closes
+  dialog.addEventListener('close', () => {
+    window._tempDialogUnit = null;
+  });
+}
 
   function debounce(fn, delay) {
     let timer = null;
@@ -1431,154 +1706,315 @@ searchInput.oninput = debounce((e) => {
     };
   }
 
-  function renderMobileInventoryList(list, items) {
-    list.innerHTML = items.map(unit => `
-      <div class="bg-white dark:bg-gray-800 rounded-xl shadow flex items-center px-4 py-3 relative mobile-inv-card" data-id="${unit.chargerId}">
-                <div class="flex-shrink-0 w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center mr-3">
-          <svg class="w-7 h-7 text-indigo-600" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M4 6c0-1.1.9-2 2-2h12c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2V6zm4 2v8h8V8H8zm2 2h4v2h-4v-2zm0 3h4v1h-4v-1z"/>
-            <circle cx="8" cy="16" r="1"/>
-            <circle cx="16" cy="16" r="1"/>
-            <path d="M12 4v2M12 18v2"/>
-          </svg>
+
+function renderMobileInventoryList(list, items) {
+  if (!items || items.length === 0) {
+    list.innerHTML = `
+      <div class="flex items-center justify-center h-64">
+        <div class="text-center">
+          <div class="text-gray-500 dark:text-gray-400 mb-4">
+            <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+            </svg>
+            No inventory items found
+          </div>
+          <button onclick="location.reload()" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">
+            Refresh
+          </button>
         </div>
-        <div class="flex-1 min-w-0">
-          <div class="font-bold text-base text-gray-900 dark:text-white truncate">${unit.chargerId}</div>
-          <div class="text-xs text-gray-600 dark:text-gray-300">${unit.status} • ${unit.location}</div>
-          <div class="text-xs text-gray-400 truncate">${unit.model || unit.product || ""}${unit.chargerSerial ? " • " + unit.chargerSerial : ""}</div>
-          ${unit.notes ? `<div class="text-xs text-blue-600 dark:text-blue-400 truncate italic">"${unit.notes}"</div>` : ''}
-        </div>
-        <button class="ml-2 text-gray-400 hover:text-purple-600 transition-all" onclick="window.openDetailsDialog(${escapeForHTML(unit)})" title="View Details">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path d="M1.5 12s3.5-7 10.5-7 10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12Z" stroke-linecap="round" stroke-linejoin="round"/>
-            <circle cx="12" cy="12" r="3.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
-        <button class="ml-1 text-gray-400 hover:text-green-600 transition-all" onclick="window.openMoveDialog(${escapeForHTML(unit)})" title="Move Unit">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path d="M3 12h18m0 0l-4-4m4 4l-4 4" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M3 6h18M3 18h18" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
       </div>
-    `).join('');
-  
-    setTimeout(() => {
-      attachMobileSwipeHandlers(list);
-    }, 100);
-  }
-  
-  function attachMobileSwipeHandlers(list) {
-    // Get the current filtered items for the mobile list
-    const searchInput = document.querySelector('#searchInput');
-    const q = searchInput ? searchInput.value.toLowerCase() : '';
-    
-    let items = window.inventory;
-    if (q) {
-      items = window.inventory.filter(i =>
-        [i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status, i.location, i.notes]
-          .some(f => (f || '').toLowerCase().includes(q))
-      );
-    }
-  
-    list.querySelectorAll('.mobile-inv-card').forEach(card => {
-      let startX = null;
-      let dx = 0;
-      let swiped = false;
-  
-      card.addEventListener('touchstart', (e) => {
-        try {
-          startX = e.touches[0].clientX;
-          dx = 0;
-          swiped = false;
-          card.style.transition = 'none';
-        } catch (err) {
-          console.warn('Touch start error:', err);
-        }
-      }, { passive: true });
-  
-      card.addEventListener('touchmove', (e) => {
-        try {
-          if (startX === null) return;
-          dx = e.touches[0].clientX - startX;
-          card.style.transform = `translateX(${dx}px)`;
-  
-          if (dx < -50 && !swiped) { // Swipe left for Edit
-            swiped = true;
-            card.style.transition = 'transform 0.2s';
-            card.style.transform = 'translateX(-80px)';
-            setTimeout(() => {
-              card.style.transform = '';
-              const unit = items.find(i => i.chargerId === card.dataset.id);
-              if (unit && typeof window.openEditDialog === 'function') {
-                window.openEditDialog(unit);
-              }
-            }, 180);
-          } else if (dx > 50 && !swiped) { // Swipe right for Move
-            swiped = true;
-            card.style.transition = 'transform 0.2s';
-            card.style.transform = 'translateX(80px)';
-            setTimeout(() => {
-              card.style.transform = '';
-              const unit = items.find(i => i.chargerId === card.dataset.id);
-              if (unit && typeof window.openMoveDialog === 'function') {
-                window.openMoveDialog(unit);
-              }
-            }, 180);
-          } 
-        } catch (err) {
-          console.warn('Touch move error:', err);
-        }
-      }, { passive: true });
-  
-      card.addEventListener('touchend', () => {
-        try {
-          startX = null;
-          dx = 0;
-          swiped = false;
-          card.style.transition = 'transform 0.2s';
-          card.style.transform = '';
-        } catch (err) {
-          console.warn('Touch end error:', err);
-        }
-      });
-    });
+    `;
+    return;
   }
 
-
-  
-  async function renderBulkActionBar() {
-    const main = document.getElementById('main-content');
-    const bar = main.querySelector('#bulkActionBar');
-    if (!bar) return;
-    if (window.selectedUnits.length === 0) {
-      bar.innerHTML = "";
-      return;
-    }
+  list.innerHTML = items.map((unit, index) => {
+    const unitKey = storeUnitData(unit, index);
+    const statusColor = getStatusColor(unit.status);
+    const locationColor = getLocationColor(unit.location);
     
-    const canManage = await canManageInventory();
-    const canDelete = await canDeleteItems();
-    
-    if (!canManage) {
-      bar.innerHTML = `
-        <div class="flex items-center gap-4 p-3 bg-gray-50 rounded-lg mb-4">
-          <span class="font-semibold text-gray-500">${window.selectedUnits.length} selected (view only)</span>
-          <button onclick="clearBulkSelection()" class="ml-auto text-gray-500 hover:text-gray-900">Cancel</button>
+    return `
+      <div class="mobile-inv-card bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 mb-3 transition-all duration-200 hover:shadow-md">
+        <div class="flex justify-between items-start mb-3">
+          <div class="flex-1 min-w-0">
+            <div class="font-bold text-lg truncate text-gray-900 dark:text-gray-100" title="${escapeForHTML(unit.chargerId)}">
+              ${escapeForHTML(unit.chargerId)}
+            </div>
+            <div class="text-sm text-gray-600 dark:text-gray-400 truncate" title="${escapeForHTML(unit.model || unit.product || '')}">
+              ${escapeForHTML(unit.model || unit.product || 'Unknown Model')}
+            </div>
+          </div>
+          <div class="text-right flex-shrink-0">
+            <span class="inline-block px-3 py-1 text-xs font-semibold rounded-full shadow-sm"
+                  style="background-color: ${statusColor.bg}; color: ${statusColor.color}; border: 1px solid ${statusColor.color}20;">
+              ${escapeForHTML(unit.status)}
+            </span>
+          </div>
         </div>
-      `;
-      return;
+        
+        <div class="grid grid-cols-2 gap-3 text-sm mb-3">
+          <div>
+            <span class="text-gray-500 dark:text-gray-400 font-medium">Serial:</span>
+            <div class="truncate text-gray-900 dark:text-gray-100 mt-1" title="${escapeForHTML(unit.chargerSerial || '')}">
+              ${unit.chargerSerial ? escapeForHTML(unit.chargerSerial) : '<span class="text-gray-400">Not set</span>'}
+            </div>
+          </div>
+          <div>
+            <span class="text-gray-500 dark:text-gray-400 font-medium">SIM:</span>
+            <div class="truncate text-gray-900 dark:text-gray-100 mt-1" title="${escapeForHTML(unit.simNumber || '')}">
+              ${unit.simNumber ? escapeForHTML(unit.simNumber) : '<span class="text-gray-400">Not set</span>'}
+            </div>
+          </div>
+        </div>
+        
+        <div class="mb-3">
+          <span class="text-gray-500 dark:text-gray-400 text-sm font-medium">Location:</span>
+          <div class="mt-1">
+            <span class="inline-block px-3 py-1 text-xs font-semibold rounded-full shadow-sm"
+                  style="background-color: ${locationColor.bg}; color: ${locationColor.color}; border: 1px solid ${locationColor.color}20;">
+              ${escapeForHTML(unit.location)}
+            </span>
+          </div>
+        </div>
+        
+        ${unit.notes ? `
+          <div class="mb-3">
+            <span class="text-gray-500 dark:text-gray-400 text-sm font-medium">Notes:</span>
+            <div class="text-sm text-gray-700 dark:text-gray-300 mt-1 line-clamp-2" title="${escapeForHTML(unit.notes)}">
+              ${escapeForHTML(unit.notes)}
+            </div>
+          </div>
+        ` : ''}
+        
+        <div class="flex gap-2 mt-4">
+          <button type="button" class="view-details-btn flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2 px-3 rounded text-sm font-medium transition-colors shadow-sm" 
+                  data-unit-key="${unitKey}">
+            <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+            </svg>
+            View
+          </button>
+          <button type="button" class="move-unit-btn flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded text-sm font-medium transition-colors shadow-sm"
+                  data-unit-key="${unitKey}">
+            <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3"/>
+            </svg>
+            Move
+          </button>
+          <button type="button" class="edit-unit-btn flex-1 bg-green-600 hover:bg-green-700 text-white py-2 px-3 rounded text-sm font-medium transition-colors shadow-sm"
+                  data-unit-key="${unitKey}">
+            <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+            </svg>
+            Edit
+          </button>
+        </div>
+        
+        <div class="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+          <div class="text-xs text-gray-400 truncate">
+            Last updated: ${new Date(unit.lastAction).toLocaleDateString()} • Added by: ${escapeForHTML(unit.addedBy || 'Unknown')}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Add event delegation for button clicks
+  list.addEventListener('click', handleMobileCardClick);
+
+  // Keep existing swipe handlers
+  attachMobileSwipeHandlers(list);
+}
+
+// Handle mobile card button clicks
+function handleMobileCardClick(e) {
+  const unitKey = e.target.dataset.unitKey;
+  if (!unitKey) return;
+
+  const unit = getUnitData(unitKey);
+  if (!unit) {
+    showToast('Unit data not found', 'red');
+    return;
+  }
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  if (e.target.classList.contains('view-details-btn')) {
+    if (typeof window.openDetailsDialog === 'function') {
+      window.openDetailsDialog(unit);
+    } else {
+      console.error('openDetailsDialog function not found');
+      showToast('View function not available', 'red');
+    }
+  } else if (e.target.classList.contains('move-unit-btn')) {
+    if (typeof window.openMoveDialog === 'function') {
+      window.openMoveDialog(unit);
+    } else {
+      console.error('openMoveDialog function not found');
+      showToast('Move function not available', 'red');
+    }
+  } else if (e.target.classList.contains('edit-unit-btn')) {
+    if (typeof window.openEditDialog === 'function') {
+      window.openEditDialog(unit);
+    } else {
+      console.error('openEditDialog function not found');
+      showToast('Edit function not available', 'red');
+    }
+  }
+}
+  
+function attachMobileSwipeHandlers(list) {
+  let startX = 0;
+  let startY = 0;
+  let currentCard = null;
+
+  list.addEventListener('touchstart', (e) => {
+    const card = e.target.closest('.mobile-inv-card');
+    if (!card) return;
+    
+    currentCard = card;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+
+  list.addEventListener('touchmove', (e) => {
+    if (!currentCard) return;
+    
+    const deltaX = e.touches[0].clientX - startX;
+    const deltaY = e.touches[0].clientY - startY;
+    
+    // Only handle horizontal swipes (ignore vertical scrolling)
+    if (Math.abs(deltaY) > Math.abs(deltaX)) return;
+    
+    if (Math.abs(deltaX) > 10) {
+      e.preventDefault(); // Prevent scrolling
+      currentCard.style.transform = `translateX(${deltaX}px)`;
+      currentCard.style.opacity = Math.max(0.3, 1 - Math.abs(deltaX) / 200);
+    }
+  });
+
+  list.addEventListener('touchend', (e) => {
+    if (!currentCard) return;
+    
+    const deltaX = e.changedTouches[0].clientX - startX;
+    
+    // Reset card position
+    currentCard.style.transform = '';
+    currentCard.style.opacity = '';
+    
+    // Handle swipe actions
+    if (Math.abs(deltaX) > 100) {
+      const unitKey = currentCard.querySelector('[data-unit-key]')?.dataset.unitKey;
+      const unit = unitKey ? getUnitData(unitKey) : null;
+      
+      if (unit) {
+        if (deltaX > 0) {
+          // Swipe right - Move
+          if (typeof window.openMoveDialog === 'function') {
+            window.openMoveDialog(unit);
+          }
+        } else {
+          // Swipe left - Edit
+          if (typeof window.openEditDialog === 'function') {
+            window.openEditDialog(unit);
+          }
+        }
+      }
     }
     
+    currentCard = null;
+  }, { passive: true });
+}
+
+// Add loading screen functions for inventory
+function showInventoryLoadingScreen() {
+  const existingLoader = document.getElementById('inventoryLoadingScreen');
+  if (existingLoader) {
+    existingLoader.remove();
+  }
+
+  const loadingHTML = `
+    <div id="inventoryLoadingScreen" class="fixed inset-0 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 flex items-center justify-center z-50">
+      <div class="text-center">
+        <div class="loading-pulse mb-8">
+          <div class="w-24 h-24 mx-auto bg-white rounded-2xl flex items-center justify-center shadow-2xl">
+            <svg class="w-16 h-16 text-purple-600" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M9 5H7a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+            </svg>
+          </div>
+        </div>
+        
+        <h2 class="text-3xl font-bold text-white mb-4">CheckMate</h2>
+        <p class="text-purple-200 text-lg mb-8">Loading Inventory</p>
+        
+        <div class="flex justify-center space-x-2">
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+        </div>
+        
+        <p id="inventoryLoadingProgress" class="text-purple-300 mt-6 text-sm">Initializing...</p>
+      </div>
+    </div>
+  `;
+
+  document.body.insertAdjacentHTML('beforeend', loadingHTML);
+}
+
+function hideInventoryLoadingScreen() {
+  const loadingScreen = document.getElementById('inventoryLoadingScreen');
+  if (loadingScreen) {
+    loadingScreen.style.opacity = '0';
+    loadingScreen.style.transition = 'opacity 0.5s ease-out';
+    setTimeout(() => {
+      loadingScreen.remove();
+    }, 500);
+  }
+}
+
+function updateInventoryLoadingProgress(message) {
+  const progressElement = document.getElementById('inventoryLoadingProgress');
+  if (progressElement) {
+    progressElement.textContent = message;
+  }
+}
+
+  
+async function renderBulkActionBar() {
+  const main = document.getElementById('main-content');
+  const bar = main.querySelector('#bulkActionBar');
+  if (!bar) return;
+  
+  if (window.selectedUnits.length === 0) {
+    bar.innerHTML = "";
+    return;
+  }
+  
+  // Check permissions for CRUD operations
+  const canManage = await canManageInventory();
+  const canDelete = await canDeleteItems();
+  
+  if (!canManage) {
     bar.innerHTML = `
-      <div class="flex items-center gap-4 p-3 bg-blue-50 dark:bg-blue-900 rounded-lg mb-4 shadow">
-        <span class="font-semibold">${window.selectedUnits.length} selected</span>
-        <button onclick="openBulkMoveDialog()" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded">Bulk Move</button>
-        <button onclick="openBulkStatusDialog()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded">Bulk Status</button>
-        ${canDelete ? `<button onclick="bulkDelete()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Bulk Delete</button>` : ""}
+      <div class="flex items-center gap-4 p-3 bg-gray-50 rounded-lg mb-4">
+        <span class="font-semibold text-gray-500">${window.selectedUnits.length} selected (view only)</span>
         <button onclick="clearBulkSelection()" class="ml-auto text-gray-500 hover:text-gray-900">Cancel</button>
       </div>
     `;
+    return;
   }
+  
+  bar.innerHTML = `
+    <div class="flex items-center gap-4 p-3 bg-blue-50 dark:bg-blue-900 rounded-lg mb-4 shadow">
+      <span class="font-semibold">${window.selectedUnits.length} selected</span>
+      <button onclick="openBulkMoveDialog()" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded">Bulk Move</button>
+      <button onclick="openBulkStatusDialog()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded">Bulk Status</button>
+      ${canDelete ? `<button onclick="bulkDelete()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Bulk Delete</button>` : ""}
+      <button onclick="clearBulkSelection()" class="ml-auto text-gray-500 hover:text-gray-900">Cancel</button>
+    </div>
+  `;
+}
 
   window.openBulkMoveDialog = async function() {
     const selected = window.inventory.filter(i => window.selectedUnits.includes(i.chargerId));
@@ -1650,36 +2086,37 @@ searchInput.oninput = debounce((e) => {
       const submitBtn = e.target.querySelector('button[value="ok"]');
       if (!debounceSubmit(submitBtn)) return;
 
-      const moveLoc = dialog.querySelector("#moveLoc").value.trim();
-      const moveStatus = dialog.querySelector("#moveStatus").value.trim();
-      const moveComment = dialog.querySelector("#moveComment").value.trim();
-      const contractorLocationsNames = (contractorLocations || []).map(l => l.name);
-    
-      if (!moveLoc) {
-        dialog.querySelector("#moveLoc").classList.add('border-red-500');
-        dialog.querySelector("#formError").textContent = "Select a location.";
-        return;
-      }
-    
-      if (
-        (isStorage(currentLocation) || installedLocations.includes(currentLocation)) &&
-        !contractorLocationsNames.includes(moveLoc) &&
-        !haveSameParent(currentLocation, moveLoc, locations) &&
-        !isAdmin() // Super admin bypass
-      ) {
-        dialog.querySelector("#formError").textContent =
-          "You can only move units from warehouse/installed to a Contractor/Technician location, unless moving within the same warehouse group.";
-        return;
-      }
-    
-      const cannotMove = selected.filter(unit =>
-        unit.location.startsWith("Back Warehouse") && !unit.chargerSerial && !moveLoc.startsWith("Back Warehouse")
-      );
-      if (cannotMove.length) {
-        dialog.querySelector("#formError").textContent =
-          `Cannot move ${cannotMove.length} unit(s) without serial out of warehouse.`;
-        return;
-      }
+const moveLoc = dialog.querySelector("#moveLoc").value.trim();
+const moveStatus = dialog.querySelector("#moveStatus").value.trim();
+const moveComment = dialog.querySelector("#moveComment").value.trim();
+
+if (!moveLoc) {
+  dialog.querySelector("#moveLoc").classList.add('border-red-500');
+  dialog.querySelector("#formError").textContent = "Select a location.";
+  return;
+}
+
+// Get dynamic location types
+const contractorLocationsNames = await getContractorLocations();
+const installedLocations = await getInstalledLocations();
+const currentLocation = selected[0]?.location;
+
+// Enhanced validation with dynamic location checking
+const isFromStorage = await isStorage(currentLocation);
+const isFromInstalled = await isInstalled(currentLocation);
+const isToContractor = contractorLocationsNames.includes(moveLoc);
+const isToInstalled = installedLocations.includes(moveLoc);
+
+if (
+  (isFromStorage || isFromInstalled) &&
+  !isToContractor &&
+  !await haveSameParent(currentLocation, moveLoc, locations) &&
+  !(await isAdmin()) // Super admin bypass
+) {
+  dialog.querySelector("#formError").textContent =
+    "You can only move units from warehouse/installed to a Contractor/Technician location, unless moving within the same location group.";
+  return;
+}
     
       dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
     
@@ -2026,14 +2463,13 @@ window.toggleActionsMenu = function(idx) {
     };
   };
 
-  function haveSameParent(locA, locB, locations) {
-    if (!locA || !locB) return false;
+  async function haveSameParent(locA, locB, locations) {
+    if (!locA || !locB || !locations) return false;
     const a = locations.find(l => l.name === locA);
     const b = locations.find(l => l.name === locB);
     return a && b && a.parent && b.parent && a.parent === b.parent;
   }
   
-  // Update openMoveDialog to use getAllowedMoveDestinations:
   window.openMoveDialog = async function(unit) {
     if (!(await canManageInventory())) {
       showToast("You don't have permission to move inventory", "red");
@@ -2043,55 +2479,62 @@ window.toggleActionsMenu = function(idx) {
     // Show loading spinner immediately
     dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Loading...</div>`;
     dialog.showModal();
+
+const settings = await loadSettings();
+const locations = await getAllLocationsWithContractors();
+const contractorLocations = locations.filter(l => l.parent === "contractor");
+const currentLocation = unit.location;
+
+let options = "";
+
+// Dynamic options based on current location's parent type
+const currentLocationObj = locations.find(l => l.name === currentLocation);
+const currentParent = currentLocationObj?.parent;
+
+if (currentParent === "warehouse") {
+  // From warehouse: can go to other warehouses or contractors
+  const warehouseLocations = locations.filter(l => 
+    l.parent === "warehouse" && l.name !== currentLocation
+  );
   
-    // Await settings and locations
-    const settings = await loadSettings();
-    const locations = await getAllLocationsWithContractors();
-    const contractorLocations = locations.filter(l => l.parent === "contractor");
-    const installedLocations = locations.filter(l => l.parent === "customer" || l.parent === "public").map(l => l.name);
-    let options = "";
-    const currentLocation = unit.location;
+  options = warehouseLocations.map(l =>
+    `<option value="${l.name}">${l.name} (Warehouse)</option>`
+  ).join("");
   
-    if (
-      isStorage(currentLocation) ||
-      installedLocations.includes(currentLocation)
-    ) {
-      // Add warehouse siblings first
-      const currentObj = locations.find(l => l.name === currentLocation);
-      const warehouseLocations = locations.filter(l => 
-        l.parent === "warehouse" && l.name !== currentLocation
-      );
-      
-      options = warehouseLocations.map(l =>
-        `<option value="${l.name}">${l.name} (Warehouse)</option>`
-      ).join("");
-      
-            // Then add contractors
-            options += (contractorLocations || []).map(l =>
-              `<option value="${l.name}">${l.name}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
-            ).join("");
-          } else if ((contractorLocations || []).map(l => l.name).includes(currentLocation)) {
-            // From contractor location - can go to warehouses or installed locations
-            options = (locations || [])
-              .filter(l => l.name !== currentLocation && l.parent === "warehouse")
-              .map(l =>
-                `<option value="${l.name}">${l.name} (${l.parent})</option>`
-              ).join("");
-            
-            // Also add the installed locations explicitly
-            installedLocations.forEach(installLoc => {
-              if (!options.includes(`value="${installLoc}"`)) {
-                options += `<option value="${installLoc}">${installLoc}</option>`;
-              }
-            });
-          } else {
-            // Default case - show all available locations except current
-            options = (locations || [])
-              .filter(l => l.name !== currentLocation)
-              .map(l =>
-                `<option value="${l.name}">${l.name}${l.parent ? ` (${l.parent})` : ""}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
-              ).join("");
-          }
+  options += contractorLocations.map(l =>
+    `<option value="${l.name}">${l.name}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
+  ).join("");
+  
+} else if (currentParent === "contractor") {
+  // From contractor: can go to warehouses or installed locations
+  const warehouseLocations = locations.filter(l => l.parent === "warehouse");
+  const installedLocations = locations.filter(l => l.parent === "customer" || l.parent === "public");
+  
+  options = warehouseLocations.map(l =>
+    `<option value="${l.name}">${l.name} (Warehouse)</option>`
+  ).join("");
+  
+  options += installedLocations.map(l =>
+    `<option value="${l.name}">${l.name} (${l.parent === "customer" ? "Customer" : "Public"})</option>`
+  ).join("");
+  
+} else if (currentParent === "customer" || currentParent === "public") {
+  // From installed: can only go to contractors first
+  options = contractorLocations.map(l =>
+    `<option value="${l.name}">${l.name}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
+  ).join("");
+  
+} else {
+  // Default case - show all available locations except current
+  options = locations
+    .filter(l => l.name !== currentLocation)
+    .map(l => {
+      const parentName = l.parent ? ` (${l.parent})` : "";
+      const contractorInfo = l.isContractor ? ` (${l.company}, ${l.phone})` : "";
+      return `<option value="${l.name}">${l.name}${parentName}${contractorInfo}</option>`;
+    })
+    .join("");
+}
   
     dialog.innerHTML = `
       <form method="dialog" class="flex flex-col gap-3 w-80">
@@ -2129,32 +2572,31 @@ window.toggleActionsMenu = function(idx) {
       const submitBtn = e.target.querySelector('button[value="ok"]');
       if (!debounceSubmit(submitBtn)) return;
 
-      const moveLoc = dialog.querySelector("#moveLoc").value.trim();
-      const moveStatus = dialog.querySelector("#moveStatus").value.trim();
-      const moveComment = dialog.querySelector("#moveComment").value.trim();
-    
-      // Define your key locations
-      const contractorLocationsNames = (contractorLocations || []).map(l => l.name);
-      const installedLocations = locations.filter(l => l.parent === "customer" || l.parent === "public").map(l => l.name);
-      const fromLoc = unit.location;
-      const toLoc = moveLoc;
-    
-      // Enforce: must go through contractor when moving to or from installed locations
-      const isFromInstalled = installedLocations.includes(fromLoc);
-      const isToInstalled = installedLocations.includes(toLoc);
-      const isFromContractor = contractorLocationsNames.includes(fromLoc);
-      const isToContractor = contractorLocationsNames.includes(toLoc);
-    
-      // Moving to installed location, must come from contractor
-      if (isToInstalled && !isFromContractor) {
-        showToast("To move a unit to Customer Stock or Public Network Stock, it must first go through a contractor/technician.", "red");
-        return;
-      }
-      // Moving out of installed location, must go to contractor
-      if (isFromInstalled && !isToContractor) {
-        showToast("To move a unit out of Customer Stock or Public Network Stock, it must first go through a contractor/technician.", "red");
-        return;
-      }
+const moveLoc = dialog.querySelector("#moveLoc").value.trim();
+const moveStatus = dialog.querySelector("#moveStatus").value.trim();
+const moveComment = dialog.querySelector("#moveComment").value.trim();
+
+// Get dynamic location data
+const contractorLocationsNames = await getContractorLocations();
+const installedLocations = await getInstalledLocations();
+const fromLoc = unit.location;
+const toLoc = moveLoc;
+
+// Dynamic validation using settings-based location types
+const isFromInstalled = await isInstalled(fromLoc);
+const isToInstalled = await isInstalled(toLoc);
+const isFromContractor = contractorLocationsNames.includes(fromLoc);
+const isToContractor = contractorLocationsNames.includes(toLoc);
+
+// Enforce workflow: must go through contractor when moving to or from installed locations
+if (isToInstalled && !isFromContractor) {
+  showToast("To move a unit to an installed location, it must first go through a contractor/technician.", "red");
+  return;
+}
+if (isFromInstalled && !isToContractor) {
+  showToast("To move a unit out of an installed location, it must first go through a contractor/technician.", "red");
+  return;
+}
     
       // ...existing validation and move logic...
       dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
@@ -2196,16 +2638,35 @@ window.toggleActionsMenu = function(idx) {
 
 
   // Helper functions for hierarchy logic
-  function isStorage(loc) {
-    // Adjust as needed for your storage location names
-    return /warehouse|stock/i.test(loc);
-  }
-  function isInstalled(loc) {
-    return /installed|customer/i.test(loc);
-  }
-  async function getContractorLocations() {
+  async function isStorage(location) {
+    if (!location) return false;
     const settings = await loadSettings();
-    return settings.locations.filter(loc => loc.parent === "Technician/Contractor");
+    const allLocations = await getAllLocationsWithContractors();
+    const locationObj = allLocations.find(l => l.name === location);
+    return locationObj?.parent === "warehouse";
+  }
+  
+  async function isInstalled(location) {
+    if (!location) return false;
+    const allLocations = await getAllLocationsWithContractors();
+    const locationObj = allLocations.find(l => l.name === location);
+    return locationObj?.parent === "customer" || locationObj?.parent === "public";
+  }
+  
+  // Add this helper function to get installed locations dynamically
+  async function getInstalledLocations() {
+    const allLocations = await getAllLocationsWithContractors();
+    return allLocations
+      .filter(l => l.parent === "customer" || l.parent === "public")
+      .map(l => l.name);
+  }
+  
+  // Add this helper function to get contractor locations dynamically  
+  async function getContractorLocations() {
+    const allLocations = await getAllLocationsWithContractors();
+    return allLocations
+      .filter(l => l.parent === "contractor")
+      .map(l => l.name);
   }
   
   async function getContractorContactInfo(locationName) {
@@ -2218,6 +2679,12 @@ window.toggleActionsMenu = function(idx) {
     return contractor ? ` (${contractor.phone})` : "";
   }
   
+  async function getWarehouseLocations() {
+    const allLocations = await getAllLocationsWithContractors();
+    return allLocations
+      .filter(l => l.parent === "warehouse")
+      .map(l => l.name);
+  }
   
   // 2. Assign Contractor Dialog: Use real contractor list from settings and store contractorId
   window.openAssignContractorDialog = async function(unit) {
