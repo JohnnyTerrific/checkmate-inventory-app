@@ -1,50 +1,78 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>CheckMate Audit Logs</title>
-        <link rel="shortcut icon" type="image/png" href="/img/logo-mini.png">
-        <!-- Tailwind CDN -->
-        <script src="https://cdn.tailwindcss.com"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-        <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-        <script>
-          tailwind.config = { darkMode: 'class' }
-        </script>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <link rel="stylesheet" href="/assets/css/style.css" />
-        <style>
-          body { visibility: hidden; }
-        </style>
-        <script type="module" crossorigin src="/assets/audit-Kf7J2_np.js"></script>
-        <link rel="modulepreload" crossorigin href="/assets/users-CxsDH44-.js">
-        <link rel="modulepreload" crossorigin href="/assets/inventory-Qxuz6K7Y.js">
-      </head>
+<head>
+    <meta charset="UTF-8">
+    <title>CheckMate Audit Logs</title>
+    <link rel="shortcut icon" type="image/png" href="/img/logo-mini.png">
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script>
+      tailwind.config = { darkMode: 'class' }
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="/assets/css/style.css" />
+    <style>
+      body { visibility: hidden; }
+      
+      /* Loading animation styles - EXACT SAME AS INDEX */
+      .loading-pulse {
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+      
+      @keyframes pulse {
+        0%, 100% { 
+          opacity: 0.4; 
+          transform: scale(0.95);
+        }
+        50% { 
+          opacity: 1; 
+          transform: scale(1.05);
+        }
+      }
+      
+      .loading-dots {
+        animation: loadingDots 1.4s ease-in-out infinite;
+      }
+      
+      @keyframes loadingDots {
+        0%, 80%, 100% { 
+          opacity: 0; 
+        }
+        40% { 
+          opacity: 1; 
+        }
+      }
+      
+      .loading-dots:nth-child(1) { animation-delay: -0.32s; }
+      .loading-dots:nth-child(2) { animation-delay: -0.16s; }
+      .loading-dots:nth-child(3) { animation-delay: 0s; }
+    </style>
+  <script type="module" crossorigin src="/assets/audit-COW3qCHw.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/users-BQb8VeAn.js">
+  <link rel="modulepreload" crossorigin href="/assets/inventory-DH0gflHQ.js">
+</head>
 <body data-page="audit">
-  <section id="audit-content" class="p-4 max-w-5xl mx-auto">
-    <h2 class="text-2xl font-bold mb-4">Audit Log</h2>
-    <div id="auditTableContainer"></div>
-  </section>
-  <dialog id="actionDialog"></dialog>
+  <!-- Main content will be injected by shell -->
+  
+  <!-- Firebase SDK + initialize MUST come before any module -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+  apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMiJl5Uo",
+  authDomain: "checkmate-enova.firebaseapp.com",
+  projectId: "checkmate-enova",
+  storageBucket: "checkmate-enova.firebasestorage.app",
+  messagingSenderId: "1036780232884",
+  appId: "1:1036780232884:web:689229ef07859db22e77e1"
+};
+    firebase.initializeApp(firebaseConfig);
+    window.db   = firebase.firestore();
+    window.auth = firebase.auth();
+  </script>
 
-     <!-- ── FIREBASE SDK + initialize MUST come before any module -->
-   <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-app-compat.js"></script>
-   <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-auth-compat.js"></script>
-   <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore-compat.js"></script>
-   <script>
-     const firebaseConfig = {
-       apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMjlJ5Uo",
-       authDomain: "checkmate-enova.firebaseapp.com",
-       projectId: "checkmate-enova",
-       storageBucket: "checkmate-enova.appspot.com",
-       messagingSenderId: "103678023284",
-       appId: "1:103678023284:web:689229ef07859db22e77e1"
-     };
-     firebase.initializeApp(firebaseConfig);
-     window.db   = firebase.firestore();
-     window.auth = firebase.auth();
-   </script>
-
-   <!-- 3) Only after Firebase init, load modules -->
+  <!-- Load modules -->
 </body>
 </html>

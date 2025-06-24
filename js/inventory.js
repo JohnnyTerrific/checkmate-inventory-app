@@ -1468,10 +1468,10 @@ function renderInventoryMobile(main, items) {
   // Enhanced mobile search with same logic as desktop
   searchInput.oninput = debounce((e) => {
     const q = e.target.value.toLowerCase();
-    
-    // Use the same filtering logic as desktop
-    let filtered = [...window.inventory];
-    
+
+    // Use the items parameter, not window.inventory!
+    let filtered = [...items];
+
     if (q) {
       filtered = filtered.filter(i => {
         const allFields = [
@@ -1481,9 +1481,9 @@ function renderInventoryMobile(main, items) {
         return allFields.some(field => (field || '').toLowerCase().includes(q));
       });
     }
-    
+
     renderMobileInventoryList(list, filtered);
-    
+
     // Show search feedback
     if (q && filtered.length === 0) {
       list.innerHTML = `

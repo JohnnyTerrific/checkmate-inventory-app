@@ -104,7 +104,14 @@ async function initializeIndexPageContent() {
     ]);
 
     updateLoadingProgress('Finalizing...');
+    // Fade in main content
+    const main = document.getElementById('main-content-area');
+    if (main) {
+      main.classList.remove('opacity-0', 'pointer-events-none');
+      main.classList.add('opacity-100');
+    }
     setTimeout(() => hideLoadingScreen(), 200); // Small delay for smoothness
+
   } catch (error) {
     console.error("Error initializing index page:", error);
     showErrorState();
@@ -487,6 +494,9 @@ function renderAssetDistributionChart(metrics, onChartRendered) {
       animation: {
         duration: 1000,
         onComplete: () => {
+                    // Show the container after chart is rendered
+                    container.classList.remove('opacity-0');
+                    container.classList.add('opacity-100');
           if (onChartRendered) onChartRendered();
         }
       },
@@ -584,7 +594,10 @@ function renderDeploymentPipeline(pipeline) {
       </div>
     </div>
   `;
-  resolve();
+      // Show the container after content is added
+      container.classList.remove('opacity-0');
+      container.classList.add('opacity-100');
+      resolve();
 });
 }
 
@@ -629,7 +642,10 @@ function renderDepreciationAnalysis(depreciation) {
       </div>
     </div>
   `;
-  resolve();
+      // Show the container after content is added
+      container.classList.remove('opacity-0');
+      container.classList.add('opacity-100');
+      resolve();
 });
 }
 
