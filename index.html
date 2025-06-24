@@ -8,8 +8,7 @@
   <script>tailwind.config = { darkMode: 'class' }</script>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="/assets/css/style.css" />
-  <style> 
-    body { visibility: hidden; } 
+  <style>  
     
     /* Loading animation styles */
     .loading-pulse {
@@ -122,6 +121,26 @@
       </div>
     </section>
   </main>
+
+     <!-- Firebase scripts and other scripts remain the same -->
+ <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-app-compat.js"></script>
+ <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-auth-compat.js"></script>
+ <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore-compat.js"></script>
+
+ <script>
+   const firebaseConfig = {
+  apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMiJl5Uo",
+  authDomain: "checkmate-enova.firebaseapp.com",
+  projectId: "checkmate-enova",
+  storageBucket: "checkmate-enova.firebasestorage.app",
+  messagingSenderId: "1036780232884",
+  appId: "1:1036780232884:web:689229ef07859db22e77e1"
+};
+   firebase.initializeApp(firebaseConfig);
+   window.db   = firebase.firestore();
+   window.auth = firebase.auth();
+ </script>
+
   
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script type="module" src="/js/core.js"></script>

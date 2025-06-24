@@ -4,19 +4,59 @@ import { loadProducts } from './products.js';
 import { loadInventory } from './inventory.js';
 import { loadSettings } from './settings.js';
 import { loadAuditLog } from './inventory.js';
-import { getCurrentUserRole } from './utils/users.js';
+import { getCurrentUserRole, getCurrentUserProfile } from './utils/users.js'; // FIXED: Added getCurrentUserProfile
 import { can } from './utils/permissions.js';
 
 
 function checkMobileAndRedirect() {
-  const isMobile = window.innerWidth < 768; // Mobile breakpoint
+  const isMobile = window.innerWidth < 768;
   if (isMobile) {
-    console.log('Mobile device detected, redirecting to inventory page');
+    // Get user role from localStorage if available (set during login)
+    const lastUserRole = localStorage.getItem('userRole');
+    
+    console.log('Mobile device detected, checking user role:', lastUserRole);
+    
+    // For Agents, always redirect to inventory
+    if (lastUserRole === 'Agent') {
+      console.log('Agent user on mobile, redirecting to inventory');
+      window.location.href = "/inventory.html";
+      return true;
+    }
+    
+    // For privileged users, check if they have a preference
+    const mobilePreference = localStorage.getItem('mobileStartPage');
+    if (mobilePreference) {
+      window.location.href = mobilePreference;
+      return true;
+    }
+    
+    // Default to inventory for mobile
+    console.log('Mobile user, redirecting to inventory by default');
     window.location.href = "/inventory.html";
-    return true; // Return true if redirecting
+    return true;
   }
-  return false; // Return false if staying on page
+  return false;
 }
+
+// Update onAuthStateChanged
+onAuthStateChanged(auth, async user => {
+  if (!user) {
+    window.location.href = "/login.html";
+  } else {
+    // Store user role for mobile redirect logic
+    const userProfile = await getCurrentUserProfile();
+    if (userProfile) {
+      localStorage.setItem('userRole', userProfile.role);
+    }
+    
+    // Check mobile redirect before initializing dashboard
+    if (checkMobileAndRedirect()) {
+      return;
+    }
+    
+    initializeIndexPageContent();
+  }
+});
 
 // Loading progress helper
 function updateLoadingProgress(message) {
@@ -37,58 +77,38 @@ function hideLoadingScreen() {
   }
 }
 
-onAuthStateChanged(auth, user => {
-  if (!user) {
-    window.location.href = "/login.html";
-  } else {
-    document.body.style.visibility = "visible";
-    initializeIndexPageContent();
-  }
-});
-
 async function initializeIndexPageContent() {
   try {
-    console.log('Starting dashboard initialization...');
-    
-    // Load all necessary data
-    const [products, inventory, settings, auditLog] = await Promise.all([
-      loadProducts(),
-      loadInventory(), 
-      loadSettings(),
-      loadAuditLog()
-    ]);
-
-    console.log('Data loaded:', {
-      products: products.length,
-      inventory: inventory.length,
-      settings: !!settings,
-      auditLog: auditLog.length
-    });
+    updateLoadingProgress('Loading products...');
+    const products = await loadProducts();
+    updateLoadingProgress('Loading inventory...');
+    const inventory = await loadInventory();
+    updateLoadingProgress('Loading settings...');
+    const settings = await loadSettings();
+    updateLoadingProgress('Loading audit log...');
+    const auditLog = await loadAuditLog();
 
     window.inventory = inventory;
-
-    // Create comprehensive business intelligence
     const businessMetrics = await calculateBusinessMetrics(inventory, products, settings, auditLog);
-    
-    console.log('Business metrics calculated:', businessMetrics);
-    
-    // Render executive dashboard with delays to prevent conflicts
+
+    updateLoadingProgress('Rendering KPIs...');
     renderExecutiveKPIs(businessMetrics);
-    
-    setTimeout(() => {
-      renderAssetDistributionChart(businessMetrics);
-    }, 100);
-    
-    setTimeout(() => {
-      renderDeploymentPipeline(businessMetrics.pipeline);
-      renderDepreciationAnalysis(businessMetrics.depreciation);
-      renderAssetHealthMetrics(businessMetrics.health);
-      renderGrowthTrajectory(businessMetrics.growth);
-    }, 200);
-    
+
+    updateLoadingProgress('Rendering charts...');
+    await Promise.all([
+      new Promise(resolve => renderAssetDistributionChart(businessMetrics, resolve)),
+      renderDeploymentPipeline(businessMetrics.pipeline),
+      renderDepreciationAnalysis(businessMetrics.depreciation),
+      renderAssetHealthMetrics(businessMetrics.health),
+      renderGrowthTrajectory(businessMetrics.growth)
+    ]);
+
+    updateLoadingProgress('Finalizing...');
+    setTimeout(() => hideLoadingScreen(), 200); // Small delay for smoothness
   } catch (error) {
     console.error("Error initializing index page:", error);
     showErrorState();
+    hideLoadingScreen();
   }
 }
 
@@ -394,22 +414,15 @@ function renderExecutiveKPIs(metrics) {
   `).join('');
 }
 
-function renderAssetDistributionChart(metrics) {
+function renderAssetDistributionChart(metrics, onChartRendered) {
   const container = document.getElementById('assetDonut');
   if (!container) {
-    console.error('Canvas element with ID "assetDonut" not found');
+    if (onChartRendered) onChartRendered();
     return;
   }
-  
   const ctx = container.getContext('2d');
-  
-  // Destroy any existing chart instance more safely
   if (window.assetChart) {
-    try {
-      window.assetChart.destroy();
-    } catch (e) {
-      console.warn('Error destroying previous chart:', e);
-    }
+    try { window.assetChart.destroy(); } catch (e) {}
   }
   
   // FIXED: Use value data first, fall back to count only if all values are 0
@@ -449,10 +462,10 @@ function renderAssetDistributionChart(metrics) {
     ctx.font = '16px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('No asset data available', container.width / 2, container.height / 2);
+    if (onChartRendered) onChartRendered();
     return;
   }
-  
-  // Create new chart with unique variable name
+
   window.assetChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
@@ -472,7 +485,10 @@ function renderAssetDistributionChart(metrics) {
       responsive: true,
       maintainAspectRatio: false,
       animation: {
-        duration: 1000
+        duration: 1000,
+        onComplete: () => {
+          if (onChartRendered) onChartRendered();
+        }
       },
       plugins: {
         title: {
@@ -525,8 +541,9 @@ function renderAssetDistributionChart(metrics) {
 }
 
 function renderDeploymentPipeline(pipeline) {
+  return new Promise(resolve => {
   const container = document.getElementById('milestone-progress');
-  if (!container) return;
+  if (!container) return resolve();
   
   const stages = [
     { key: 'warehouse', label: 'Warehouse', color: '#3b82f6' },
@@ -567,11 +584,14 @@ function renderDeploymentPipeline(pipeline) {
       </div>
     </div>
   `;
+  resolve();
+});
 }
 
 function renderDepreciationAnalysis(depreciation) {
+  return new Promise(resolve => {
   const container = document.getElementById('depreciation-summary');
-  if (!container) return;
+  if (!container) return resolve();
   
   // Handle case where no depreciation data exists
   if (!depreciation.assets || depreciation.assets.length === 0) {
@@ -609,11 +629,14 @@ function renderDepreciationAnalysis(depreciation) {
       </div>
     </div>
   `;
+  resolve();
+});
 }
 
 function renderAssetHealthMetrics(health) {
+  return new Promise(resolve => {
   const container = document.getElementById('asset-health');
-  if (!container) return;
+  if (!container) return resolve();
   
   const total = health.operational + health.faulty + health.maintenance + health.rma;
   
@@ -637,11 +660,14 @@ function renderAssetHealthMetrics(health) {
       </div>
     </div>
   `;
+  resolve();
+});
 }
 
 function renderGrowthTrajectory(growth) {
+  return new Promise(resolve => {
   const container = document.getElementById('growth-trajectory');
-  if (!container) return;
+  if (!container) return resolve();
   
   const trendIcon = growth.growthRate > 0 ? "📈" : growth.growthRate < 0 ? "📉" : "➡️";
   const trendColor = growth.growthRate > 0 ? "text-green-600" : growth.growthRate < 0 ? "text-red-600" : "text-gray-600";
@@ -682,6 +708,8 @@ function renderGrowthTrajectory(growth) {
     </div>
     ` : ''}
   `;
+  resolve();
+});
 }
 
 function showErrorState() {

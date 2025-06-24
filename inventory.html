@@ -1,24 +1,57 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>CheckMate Inventory Management</title>
-  <link rel="shortcut icon" href="/img/logo-mini.png">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-
-  <!-- Tailwind -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script> tailwind.config = { darkMode: 'class' } </script>
-
-  <!-- Third-party libs -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
-
-  <!-- Hide until JS is ready -->
-  <style> body { visibility: hidden; } </style>
-
-  <link rel="stylesheet" href="/assets/css/style.css">
-</head>
+  <head>
+    <meta charset="UTF-8">
+    <title>CheckMate Inventory Management</title>
+    <link rel="shortcut icon" href="/img/logo-mini.png">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+  
+    <!-- Tailwind -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script> tailwind.config = { darkMode: 'class' } </script>
+  
+    <!-- Third-party libs BEFORE Firebase -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+  
+    <style> 
+      body { visibility: hidden; }
+      
+      /* Loading animation styles - SAME AS INDEX.HTML */
+      .loading-pulse {
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+      
+      @keyframes pulse {
+        0%, 100% { 
+          opacity: 0.4; 
+          transform: scale(0.95);
+        }
+        50% { 
+          opacity: 1; 
+          transform: scale(1.05);
+        }
+      }
+      
+      .loading-dots {
+        animation: loadingDots 1.4s ease-in-out infinite;
+      }
+      
+      @keyframes loadingDots {
+        0%, 80%, 100% { 
+          opacity: 0; 
+        }
+        40% { 
+          opacity: 1; 
+        }
+      }
+      
+      .loading-dots:nth-child(1) { animation-delay: -0.32s; }
+      .loading-dots:nth-child(2) { animation-delay: -0.16s; }
+      .loading-dots:nth-child(3) { animation-delay: 0s; }
+    </style>
+    <link rel="stylesheet" href="/assets/css/style.css">
+  </head>
 <body data-page="inventory">
   <div class="flex gap-2 mb-4">
     <button id="floatingBackBtn" class="fixed top-24 left-8 z-40 px-4 py-2 bg-gray-200 dark:bg-gray-800 rounded-xl shadow-lg hidden transition hover:bg-gray-300 dark:hover:bg-gray-700 flex items-center gap-2">
@@ -29,7 +62,7 @@
     </button>
   </div>
 
-  <div id="main-content" class="overflow-x-hidden w-full">
+  <div id="main-content" class="overflow-x-hidden w-full"></div>
 
      <!-- 1) Firestore & Auth SDKs -->
  <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-app-compat.js"></script>
@@ -38,22 +71,27 @@
 
  <!-- 2) Initialize Firebase BEFORE any module -->
  <script>
-   const firebaseConfig = {
-     apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMjlJ5Uo",
-     authDomain: "checkmate-enova.firebaseapp.com",
-     projectId: "checkmate-enova",
-     storageBucket: "checkmate-enova.appspot.com",
-     messagingSenderId: "103678023284",
-     appId: "1:103678023284:web:689229ef07859db22e77e1"
-   };
-   firebase.initializeApp(firebaseConfig);
-   window.db   = firebase.firestore();
-   window.auth = firebase.auth();
- </script>
+  const firebaseConfig = {
+  apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMiJl5Uo",
+  authDomain: "checkmate-enova.firebaseapp.com",
+  projectId: "checkmate-enova",
+  storageBucket: "checkmate-enova.firebasestorage.app",
+  messagingSenderId: "1036780232884",
+  appId: "1:1036780232884:web:689229ef07859db22e77e1"
+};
+  firebase.initializeApp(firebaseConfig);
+  window.db = firebase.firestore();
+  window.auth = firebase.auth();
+  
+  // Show body after Firebase is ready
+  document.body.style.visibility = 'visible';
+  
+  console.log('Firebase initialized:', !!window.db);
+</script>
 
- <!-- 3) Modules (after Firebase) -->
- <script type="module" src="/js/core.js"></script>
- <script type="module" src="/js/shipments.js"></script>
- <script type="module" src="/js/inventory.js"></script>
+  <!-- Your modules -->
+  <script type="module" src="/js/core.js"></script>
+  <script type="module" src="/js/shipments.js"></script>
+  <script type="module" src="/js/inventory.js"></script>
 </body>
 </html>

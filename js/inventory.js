@@ -1,13 +1,10 @@
 // inventory.js (starter for Inventory Management tab)
 
 import { showToast } from './core.js';
-import { allowedStatusesByParent, getAllowedStatusesForLocation, loadSettings } from './settings.js';
+import { getAllowedStatusesForLocation, loadSettings } from './settings.js';
 import { getCurrentUserRole, getCurrentUserEmail } from './utils/users.js';
-import { can, getPermissions } from './utils/permissions.js';
-import Quagga from 'quagga';
-import * as XLSX from 'xlsx';
-import { db } from './utils/firebase.js';
-import { collection, getDocs, doc, setDoc, deleteDoc, writeBatch, orderBy, query, onSnapshot } from "firebase/firestore";
+import { can } from './utils/permissions.js';
+
 window.isInitialLoad = true;
 
 let inventoryUnsubscribe = null;
@@ -92,24 +89,23 @@ function getFilteredInventory() {
 
 // 1) Load entire inventory from Firestore
 export async function loadInventory() {
-  const snapshot = await getDocs(collection(db, "inventory"));
+  const snapshot = await window.db.collection("inventory").get();
   return snapshot.docs.map(doc => ({ chargerId: doc.id, ...doc.data() }));
 }
-
 // 2) Save (overwrite) inventory array into Firestore
 export async function saveInventory(list) {
-  const colRef = collection(db, "inventory");
+  const colRef = window.db.collection("inventory");
   
   // Delete all existing docs in batches
-  const existing = await getDocs(colRef);
+  const existing = await colRef.get();
   const deletePromises = [];
   
   for (let i = 0; i < existing.docs.length; i += 450) { // Firebase batch limit is 500
-    const batch = writeBatch(db);
+    const batch = window.db.batch();
     const chunk = existing.docs.slice(i, i + 450);
     
     chunk.forEach(docSnap => {
-      batch.delete(doc(db, "inventory", docSnap.id));
+      batch.delete(window.db.collection("inventory").doc(docSnap.id));
     });
     
     deletePromises.push(batch.commit());
@@ -121,11 +117,11 @@ export async function saveInventory(list) {
   const addPromises = [];
   
   for (let i = 0; i < list.length; i += 450) {
-    const batch = writeBatch(db);
+    const batch = window.db.batch();
     const chunk = list.slice(i, i + 450);
     
     chunk.forEach(unit => {
-      batch.set(doc(db, "inventory", unit.chargerId), {
+      batch.set(window.db.collection("inventory").doc(unit.chargerId), {
         chargerSerial: unit.chargerSerial || "",
         simNumber: unit.simNumber || "",
         model: unit.model || "",
@@ -159,7 +155,7 @@ export async function updateSingleItem(item) {
   }
 
   return safeFirebaseOperation(async () => {
-    await setDoc(doc(db, "inventory", item.chargerId), {
+    await window.db.collection("inventory").doc(item.chargerId).set({
       chargerSerial: item.chargerSerial || "",
       simNumber: item.simNumber || "",
       model: item.model || "",
@@ -191,8 +187,8 @@ function listenToInventoryUpdates() {
     inventoryUnsubscribe();
   }
   
-  const colRef = collection(db, "inventory");
-  inventoryUnsubscribe = onSnapshot(colRef, 
+  const colRef = window.db.collection("inventory");
+  inventoryUnsubscribe = colRef.onSnapshot(
     debounce((snapshot) => {
       try {
         window.inventory = snapshot.docs.map(doc => ({ chargerId: doc.id, ...doc.data() }));
@@ -294,22 +290,9 @@ function debounceSubmit(element, delay = 2000) {
   return true;
 }
 
-function escapeForHTML(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-    .replace(/\//g, '&#x2F;');
-}
-
 // 3) Load entire audit log from Firestore
 export async function loadAuditLog() {
-  const colRef = collection(db, "auditLog");
-  const q = query(colRef, orderBy("date", "asc"));
-  const snapshot = await getDocs(q);
+  const snapshot = await window.db.collection("auditLog").orderBy("date", "asc").get();
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 }
 
@@ -321,12 +304,12 @@ export async function saveAuditLog(newEntries) {
   }
 
   try {
-    const batch = writeBatch(db);
-    const colRef = collection(db, "auditLog");
+    const batch = window.db.batch();
+    const colRef = window.db.collection("auditLog");
 
-    newEntries.forEach(entry => {
-      const docRef = doc(colRef);
-      batch.set(docRef, {
+  newEntries.forEach(entry => {
+  const docRef = colRef.doc();
+  batch.set(docRef, {
         date: entry.date || new Date().toISOString(),
         action: entry.action || "Unknown Action",
         chargerId: entry.chargerId || "",
@@ -635,9 +618,9 @@ renderInventoryTable(document.getElementById('main-content'));
     if (!confirm(`Are you sure you want to delete ${window.selectedUnits.length} unit(s)?`)) return;
   
     // Use batch delete
-    const batch = writeBatch(db);
+    const batch = window.db.batch();
     window.selectedUnits.forEach(chargerId => {
-      batch.delete(doc(db, "inventory", chargerId));
+      batch.delete(window.db.collection("inventory").doc(chargerId));
     });
     await batch.commit();
   
@@ -773,9 +756,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       showInventoryLoadingScreen();
       
       updateInventoryLoadingProgress('Initializing Firebase connection...');
-      
-      // REMOVED: Permission check for viewing inventory - all users can view
-      // The inventory page should be accessible to everyone
       
       // Wait for Firebase to be ready
       let retryCount = 0;
@@ -1951,7 +1931,7 @@ function showInventoryLoadingScreen() {
         <div class="loading-pulse mb-8">
           <div class="w-24 h-24 mx-auto bg-white rounded-2xl flex items-center justify-center shadow-2xl">
             <svg class="w-16 h-16 text-purple-600" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M9 5H7a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+              <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
           </div>
         </div>
@@ -2465,7 +2445,7 @@ window.toggleActionsMenu = function(idx) {
     dialog.querySelector('button[value="ok"]').onclick = async e => {
       let items = [...window.inventory];
       items = items.filter(i => i.chargerId !== chargerId);
-      await deleteDoc(doc(db, "inventory", chargerId));
+      await window.db.collection("inventory").doc(chargerId).delete();
       window.inventory = window.inventory.filter(i => i.chargerId !== chargerId);
       showToast("Unit deleted", "red");
       window.inventory = items;
@@ -2688,13 +2668,6 @@ if (isFromInstalled && !isToContractor) {
       c => locationName.toLowerCase().includes(c.name.toLowerCase())
     );
     return contractor ? ` (${contractor.phone})` : "";
-  }
-  
-  async function getWarehouseLocations() {
-    const allLocations = await getAllLocationsWithContractors();
-    return allLocations
-      .filter(l => l.parent === "warehouse")
-      .map(l => l.name);
   }
   
   // 2. Assign Contractor Dialog: Use real contractor list from settings and store contractorId
@@ -2931,11 +2904,11 @@ if (isFromInstalled && !isToContractor) {
   };
   
   export async function loadShipments() {
-    const snapshot = await getDocs(collection(db, "shipments"));
+    const snapshot = await window.db.collection("shipments").get();
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   }
   export async function loadProducts() {
-    const snapshot = await getDocs(collection(db, "Products"));
+    const snapshot = await window.db.collection("Products").get();
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   }
   

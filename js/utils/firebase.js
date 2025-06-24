@@ -6,7 +6,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMiJl5Uo",
   authDomain: "checkmate-enova.firebaseapp.com",
   projectId: "checkmate-enova",
-  storageBucket: "checkmate-enova.appspot.com",
+  storageBucket: "checkmate-enova.firebasestorage.app",
   messagingSenderId: "1036780232884",
   appId: "1:1036780232884:web:689229ef07859db22e77e1"
 };
