@@ -13,6 +13,17 @@ window.isInitialLoad = true;
 let inventoryUnsubscribe = null;
 let currentLayoutMode = window.innerWidth < 900 ? 'mobile' : 'desktop';
 
+function escapeForHTML(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/\//g, '&#x2F;');
+}
+
 function shouldUseMobileLayout() {
   // Force mobile layout for screens smaller than 900px OR touch devices
   return window.innerWidth < 900 || ('ontouchstart' in window);
