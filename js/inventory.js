@@ -2732,6 +2732,7 @@ if (isFromInstalled && !isToContractor) {
         items[idx].contractorId = contractor.id;
         items[idx].status = 'Reserved';
         items[idx].lastAction = new Date().toISOString();
+        items[idx].assignedDate = new Date().toISOString();
         if (assignComment) items[idx].notes = assignComment;
       }
       await updateSingleItem(items[idx]);

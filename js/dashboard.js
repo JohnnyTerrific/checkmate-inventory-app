@@ -1,7 +1,8 @@
-import { loadInventory, loadShipments } from "../js/inventory.js";
+import { loadInventory } from "../js/inventory.js";
+import { loadShipments } from "../js/shipments.js";
 import { getCurrentUserRole } from './utils/users.js';
 import { can } from './utils/permissions.js';
-import { showToast } from './core.js'; // ADD THIS LINE
+import { showToast } from './core.js';
 import { 
   getDashboardStats, 
   loadSettings,
@@ -75,6 +76,8 @@ function injectDashboardPage() {
           </div>
         </div>
 
+        
+
         <!-- Aging Alerts -->
         <div id="agingAlerts" class="bg-gradient-to-r from-red-50 to-pink-50 dark:from-red-900 dark:to-pink-900 rounded-xl shadow-sm border border-red-200 dark:border-red-700 p-6">
           <div class="flex items-center justify-between mb-4">
@@ -88,6 +91,40 @@ function injectDashboardPage() {
           <div id="agingList" class="space-y-2"></div>
         </div>
       </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-8">
+      <div class="p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Shipments</h3>
+          <div class="flex items-center gap-3">
+            <button id="refreshShipments" class="text-sm text-purple-600 hover:text-purple-700 underline">
+              Refresh
+            </button>
+            <!-- REMOVED: New Shipment button - shipments are created in inventory page -->
+          </div>
+        </div>
+        
+        <!-- Shipments Tabs -->
+        <div class="mb-4">
+          <nav class="flex space-x-8 border-b border-gray-200 dark:border-gray-700">
+            <button id="pendingShipmentsTab" class="shipment-tab active py-2 px-1 border-b-2 border-purple-500 text-purple-600 font-medium text-sm">
+              Pending
+            </button>
+            <button id="arrivedShipmentsTab" class="shipment-tab py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm">
+              Arrived
+            </button>
+            <button id="allShipmentsTab" class="shipment-tab py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm">
+              All
+            </button>
+          </nav>
+        </div>
+        
+        <!-- Shipments Content -->
+        <div id="shipmentsList" class="space-y-3 min-h-[200px]">
+          <!-- Shipments will be populated here -->
+        </div>
+      </div>
+    </div>
 
       <!-- Charts and Performance Section -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -153,17 +190,14 @@ function renderStatusDonut(byStatus, originalByStatus) {
     window.statusChart.destroy();
   }
 
-  if (!originalByStatus) originalByStatus = byStatus;
+  // FIXED: Store original data properly
+  if (!originalByStatus) {
+    originalByStatus = { ...byStatus }; // Create a copy
+  }
 
   // Rainbow color palette - SAME as pills
   const rainbowColors = [
-    '#ff0000', // Red
-    '#ff7f00', // Orange
-    '#ffff00', // Yellow
-    '#00ff00', // Green
-    '#0000ff', // Blue
-    '#4b0082', // Indigo
-    '#8f00ff'  // Violet
+    '#ff0000', '#ff7f00', '#ffff00', '#00ff00', '#0000ff', '#4b0082', '#8f00ff'
   ];
 
   const total = Object.values(byStatus).reduce((sum, val) => sum + val, 0);
@@ -184,17 +218,17 @@ function renderStatusDonut(byStatus, originalByStatus) {
     processedData['Others'] = othersCount;
   }
 
-  // Create color array that matches the order of labels
   const chartLabels = Object.keys(processedData);
-  const chartColors = chartLabels.map((label, index) => rainbowColors[index % rainbowColors.length]);
+  const chartColors = chartLabels.map((_label, index) => rainbowColors[index % rainbowColors.length]);
 
+  // FIXED: Create chart without DataLabels plugin for status chart
   window.statusChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
       labels: chartLabels,
       datasets: [{
         data: Object.values(processedData),
-        backgroundColor: chartColors, // Use rainbow colors
+        backgroundColor: chartColors,
         borderWidth: 0,
         hoverOffset: 8,
         hoverBorderWidth: 2,
@@ -211,6 +245,8 @@ function renderStatusDonut(byStatus, originalByStatus) {
       },
       plugins: {
         legend: { display: false },
+        // FIXED: Don't register datalabels for this chart
+        datalabels: false, // Explicitly disable
         tooltip: {
           backgroundColor: 'rgba(0, 0, 0, 0.8)',
           titleColor: '#ffffff',
@@ -227,7 +263,7 @@ function renderStatusDonut(byStatus, originalByStatus) {
               
               if (label === 'Others') {
                 const otherItems = Object.entries(byStatus)
-                  .filter(([status, count]) => count < threshold)
+                  .filter(([_status, count]) => count < threshold)
                   .map(([status, count]) => `${status}: ${count}`)
                   .join(', ');
                 return [`Others (${percentage}%): ${value}`, otherItems];
@@ -247,8 +283,9 @@ function renderStatusDonut(byStatus, originalByStatus) {
           const status = this.data.labels[idx];
           
           if (status !== 'Others') {
-            if (Object.keys(byStatus).length > 1) {
-              const originalValue = byStatus[status];
+            // Filter to show only the selected status
+            const originalValue = originalByStatus[status] || 0;
+            if (originalValue > 0) {
               renderStatusDonut({ [status]: originalValue }, originalByStatus);
             }
           }
@@ -260,7 +297,11 @@ function renderStatusDonut(byStatus, originalByStatus) {
     }
   });
 
-  // FIXED: Pass the same rainbow colors to pills
+  // FIXED: Store original data on chart instance for reset functionality
+  window.statusChart.originalByStatus = originalByStatus;
+  window.statusChart.currentByStatus = byStatus;
+
+  // Pass the same rainbow colors to pills
   renderStatusPills(byStatus, chartLabels, chartColors, (selectedStatus) => {
     showChargerListForStatus(selectedStatus);
   });
@@ -279,7 +320,7 @@ function renderStatusPills(statusMap, chartLabels, chartColors, onClickStatus) {
   container.style.scrollbarWidth = 'thin';
   
   container.innerHTML = labels.map((label, i) => {
-    // FIXED: Use same color mapping as chart
+    // Use same color mapping as chart
     const colorIndex = chartLabels ? chartLabels.indexOf(label) : i;
     const color = chartColors && colorIndex >= 0 ? chartColors[colorIndex] : rainbowColors[i % rainbowColors.length];
     
@@ -305,9 +346,10 @@ function renderStatusPills(statusMap, chartLabels, chartColors, onClickStatus) {
   const resetBtn = document.createElement('button');
   resetBtn.className = 'px-2 py-1 rounded-full text-gray-700 text-xs font-semibold whitespace-nowrap hover:scale-105 transition transform border border-gray-300 flex-shrink-0';
   resetBtn.style.background = 'white';
+  resetBtn.style.color = '#374151';
   resetBtn.textContent = 'Reset View';
   resetBtn.onclick = () => {
-    // Get the original data from the chart instance
+    // FIXED: Use the stored original data
     if (window.statusChart && window.statusChart.originalByStatus) {
       renderStatusDonut(window.statusChart.originalByStatus, window.statusChart.originalByStatus);
     }
@@ -326,7 +368,6 @@ function renderStatusPills(statusMap, chartLabels, chartColors, onClickStatus) {
   ];
 
   function renderLostMeter(stats, inventory) {
-    // Count lost
     const lostCount = inventory.filter(i => 
       (i.location && typeof i.location === "string" && i.location.toLowerCase().includes('lost')) ||
       (typeof i.status === "string" && i.status.toLowerCase() === "unknown")
@@ -338,10 +379,14 @@ function renderStatusPills(statusMap, chartLabels, chartColors, onClickStatus) {
       window.lostMeterChart.destroy();
     }
   
-    // FIXED: Use rainbow colors for lost meter
+    const rainbowColors = [
+      '#ff0000', '#ff7f00', '#ffff00', '#00ff00', '#0000ff', '#4b0082', '#8f00ff'
+    ];
+    
     const colorIndex = Math.min(Math.floor(percent / 15), rainbowColors.length - 1);
     
-    window.lostMeterChart = new Chart(ctx, {
+    // FIXED: Create chart with proper DataLabels configuration
+    const chartConfig = {
       type: 'doughnut',
       data: {
         labels: ['Lost/Unknown', 'Other'],
@@ -364,29 +409,41 @@ function renderStatusPills(statusMap, chartLabels, chartColors, onClickStatus) {
             backgroundColor: 'rgba(0, 0, 0, 0.8)',
             titleColor: '#ffffff',
             bodyColor: '#ffffff'
-          },
-          datalabels: {
-            color: ['#ffffff', '#6b7280'],
-            font: { weight: 'bold', size: 16 },
-            textStrokeColor: '#000000',
-            textStrokeWidth: 1,
-            formatter: (value, context) => {
-              if (context.dataIndex === 0) {
-                return `${percent}%`;
-              }
-              return '';
-            }
           }
         },
         animation: {
           animateRotate: true,
           duration: 1000
         }
-      },
-      plugins: [ChartDataLabels] // FIXED: Only include if available
-    });
+      }
+    };
   
-    // Animate the label (count up)
+    // FIXED: Only add datalabels if available and register it properly
+    if (typeof ChartDataLabels !== 'undefined') {
+      try {
+        // Register plugin only for this chart instance
+        chartConfig.plugins = [ChartDataLabels];
+        chartConfig.options.plugins.datalabels = {
+          color: ['#ffffff', '#6b7280'],
+          font: { weight: 'bold', size: 16 },
+          textStrokeColor: '#000000',
+          textStrokeWidth: 1,
+          formatter: (value, context) => {
+            if (context.dataIndex === 0) {
+              return `${percent}%`;
+            }
+            return '';
+          }
+        };
+      } catch (error) {
+        console.warn('ChartDataLabels plugin configuration failed:', error);
+        // Continue without the plugin
+      }
+    }
+  
+    window.lostMeterChart = new Chart(ctx, chartConfig);
+  
+    // Rest of the function remains the same...
     const label = document.getElementById('lostMeterLabel');
     if (label) {
       let current = 0;
@@ -405,10 +462,8 @@ function renderStatusPills(statusMap, chartLabels, chartColors, onClickStatus) {
       animate();
     }
   
-    // Render a legend below the pie
     const legend = document.getElementById('lostMeterLegend');
     if (legend) {
-      // Group by model for lost
       const grouped = {};
       inventory.filter(i => 
         (i.location && typeof i.location === "string" && i.location.toLowerCase().includes('lost')) ||
@@ -534,30 +589,63 @@ function renderShipmentCountdown(nextTs) {
 async function renderAgingAlerts(stats, inventory) {
   const list = document.getElementById('agingList');
   if (stats.overdueCount === 0) {
-    return list.innerHTML = '<li>No overdue items</li>';
+    return list.innerHTML = '<li class="text-gray-500">No overdue items</li>';
   }
+  
   const now = Date.now();
-  const threshold = 14 * 24 * 60 * 60 * 1000;
+  const threshold = 14 * 24 * 60 * 60 * 1000; // 14 days
 
-  // Get contractor names from settings
+  // Get contractor info from settings
   const settings = await loadSettings();
   const contractorNames = (settings.contractors || []).map(c => c.name);
 
-  // Only show overdue items assigned to a contractor
-  const overdueItems = inventory.filter(i =>
-    i.assignedDate &&
-    (now - new Date(i.assignedDate).getTime()) > threshold &&
-    contractorNames.includes(i.location)
-  );
+  // Find overdue items - check both assignedDate and contractor assignment
+  const overdueItems = inventory.filter(i => {
+    // Must have an assigned date
+    if (!i.assignedDate) return false;
+    
+    // Must be assigned to a contractor (check multiple ways)
+    const isAssignedToContractor = 
+      contractorNames.includes(i.location) || // Location matches contractor name
+      i.contractorId || // Has contractor ID
+      i.status === 'Reserved'; // Has reserved status
+    
+    if (!isAssignedToContractor) return false;
+    
+    // Check if overdue
+    const assignedTime = new Date(i.assignedDate).getTime();
+    const daysPassed = (now - assignedTime) / (1000 * 60 * 60 * 24);
+    
+    return daysPassed > 14;
+  });
 
-  list.innerHTML = overdueItems.length
-    ? overdueItems
-        .map(i => `<li>Charger ${i.chargerId} assigned on ${new Date(i.assignedDate).toLocaleDateString()}</li>`)
-        .join('')
-    : '<li>No overdue items</li>';
+  console.log('Overdue items found:', overdueItems.length); // Debug log
+
+  if (overdueItems.length === 0) {
+    list.innerHTML = '<li class="text-gray-500">No overdue contractor assignments</li>';
+    return;
+  }
+
+  list.innerHTML = overdueItems
+    .map(i => {
+      const daysPassed = Math.floor((now - new Date(i.assignedDate).getTime()) / (1000 * 60 * 60 * 24));
+      return `
+        <li class="flex justify-between items-center p-2 bg-red-50 dark:bg-red-900 rounded">
+          <div>
+            <span class="font-medium">Charger ${i.chargerId}</span>
+            <span class="text-sm text-gray-600 dark:text-gray-400">
+              → ${i.location}
+            </span>
+          </div>
+          <div class="text-sm text-red-600 dark:text-red-400">
+            ${daysPassed} days overdue
+          </div>
+        </li>
+      `;
+    })
+    .join('');
 }
 
-// REPLACE the renderLocationStackedBar function with this fixed version:
 async function renderLocationStackedBar(locStats, inventory) {
   // FIXED: First check if we already have a location distribution section
   let container = document.getElementById('locationDistributionSection');
@@ -1119,68 +1207,6 @@ function showLocationBreakdown(location, data) {
   dialog.showModal();
 }
 
-// Add these helper functions for the drill-down functionality
-async function showUnitsForModel(location, model) {
-  const inventory = await loadInventory();
-  const units = inventory.filter(i => i.location === location && (i.model || 'Unknown') === model);
-  
-  const dialog = document.getElementById('chargerListDialog');
-  const content = dialog.querySelector('.p-6');
-  
-  content.innerHTML = `
-    <div class="mb-4">
-      <h3 class="text-lg font-semibold mt-2">${model} Units in ${location} (${units.length})</h3>
-    </div>
-    
-    <div class="grid gap-2 max-h-80 overflow-y-auto">
-      ${units.map(unit => `
-        <div class="bg-white dark:bg-gray-800 rounded p-3 border">
-          <div class="flex justify-between items-start">
-            <div>
-              <div class="font-medium">${unit.chargerId}</div>
-              <div class="text-sm text-gray-500">Status: ${unit.status || 'Unknown'}</div>
-            </div>
-            <div class="text-xs text-gray-400">
-              ${unit.assignedDate ? new Date(unit.assignedDate).toLocaleDateString() : ''}
-            </div>
-          </div>
-        </div>
-      `).join('')}
-    </div>
-  `;
-}
-
-async function showAllUnitsForLocation(location) {
-  const inventory = await loadInventory();
-  const units = inventory.filter(i => i.location === location);
-  
-  const dialog = document.getElementById('chargerListDialog');
-  const content = dialog.querySelector('.p-6');
-  
-  content.innerHTML = `
-    <div class="mb-4">
-      <h3 class="text-lg font-semibold mt-2">All Units in ${location} (${units.length})</h3>
-    </div>
-    
-    <div class="grid gap-2 max-h-80 overflow-y-auto">
-      ${units.map(unit => `
-        <div class="bg-white dark:bg-gray-800 rounded p-3 border">
-          <div class="flex justify-between items-start">
-            <div>
-              <div class="font-medium">${unit.chargerId}</div>
-              <div class="text-sm text-gray-600">${unit.model || 'Unknown Model'}</div>
-              <div class="text-sm text-gray-500">Status: ${unit.status || 'Unknown'}</div>
-            </div>
-            <div class="text-xs text-gray-400">
-              ${unit.assignedDate ? new Date(unit.assignedDate).toLocaleDateString() : ''}
-            </div>
-          </div>
-        </div>
-      `).join('')}
-    </div>
-  `;
-}
-
 async function showChargerListForStatus(status) {
   const dialog = document.getElementById('chargerListDialog') || document.createElement('dialog');
   dialog.id = 'chargerListDialog';
@@ -1240,6 +1266,9 @@ document.addEventListener('DOMContentLoaded', () => {
       
       updateLoadingProgress('Loading shipments...');
       const shipments = await loadShipments();
+
+      updateLoadingProgress('Initializing shipments...');
+      await initializeShipmentsSection();
       
       updateLoadingProgress('Calculating statistics...');
       const stats = await getDashboardStats(inventory, shipments);
@@ -1250,7 +1279,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await renderAgingAlerts(stats, inventory);
       
             // FIXED: Store original data for reset functionality
-            renderStatusDonut(stats.byStatus);
+            renderStatusDonut(stats.byStatus, stats.byStatus);
             if (window.statusChart) {
               window.statusChart.originalByStatus = stats.byStatus;
             }
@@ -1295,16 +1324,21 @@ document.addEventListener('DOMContentLoaded', () => {
           const inventory = await loadInventory();
           
           updateLoadingProgress('Loading shipments...');
-          const shipments = await loadShipments();
+          const shipments = await loadShipments(); // ADD THIS LINE
+          
+          updateLoadingProgress('Refreshing shipments...');
+          const activeTab = document.querySelector('.shipment-tab.active');
+          const tabType = activeTab?.id.replace('ShipmentsTab', '').toLowerCase() || 'pending';
+          await populateShipmentsList(tabType);
           
           updateLoadingProgress('Calculating stats...');
-          const stats = await getDashboardStats(inventory, shipments);
+          const stats = await getDashboardStats(inventory, shipments); // NOW shipments is defined
           
           updateLoadingProgress('Updating dashboard...');
           await renderStatCards(stats, inventory);
           renderShipmentCountdown(stats.nextShipment);
           await renderAgingAlerts(stats, inventory);
-          renderStatusDonut(stats.byStatus);
+          renderStatusDonut(stats.byStatus, stats.byStatus);
           renderLostMeter(stats, inventory);
           await renderLocationStackedBar(null, inventory);
           
@@ -1386,5 +1420,168 @@ function updateLoadingProgress(message) {
   const progressElement = document.getElementById('dashboardLoadingProgress');
   if (progressElement) {
     progressElement.textContent = message;
+  }
+}
+
+async function initializeShipmentsSection() {
+  try {
+    await populateShipmentsList('pending');
+    setupShipmentsEventListeners();
+  } catch (error) {
+    console.error('Error initializing shipments section:', error);
+  }
+}
+
+// Setup event listeners for shipments section
+function setupShipmentsEventListeners() {
+  // Tab switching
+  document.querySelectorAll('.shipment-tab').forEach(tab => {
+    tab.addEventListener('click', (e) => {
+      // Remove active class from all tabs
+      document.querySelectorAll('.shipment-tab').forEach(t => {
+        t.classList.remove('active', 'border-purple-500', 'text-purple-600');
+        t.classList.add('border-transparent', 'text-gray-500');
+      });
+      
+      // Add active class to clicked tab
+      e.target.classList.add('active', 'border-purple-500', 'text-purple-600');
+      e.target.classList.remove('border-transparent', 'text-gray-500');
+      
+      // Load appropriate data
+      const tabType = e.target.id.replace('ShipmentsTab', '').toLowerCase();
+      populateShipmentsList(tabType);
+    });
+  });
+
+  // Refresh button
+  document.getElementById('refreshShipments')?.addEventListener('click', () => {
+    const activeTab = document.querySelector('.shipment-tab.active');
+    const tabType = activeTab?.id.replace('ShipmentsTab', '').toLowerCase() || 'pending';
+    populateShipmentsList(tabType);
+  });
+}
+
+// Function to populate the shipments list
+async function populateShipmentsList(filterType = 'pending') {
+  const container = document.getElementById('shipmentsList');
+  if (!container) return;
+
+  // Show loading state
+  container.innerHTML = `
+    <div class="flex items-center justify-center py-8">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
+      <span class="ml-2 text-gray-600">Loading shipments...</span>
+    </div>
+  `;
+
+  try {
+    const shipments = await loadShipments();
+    
+    let filteredShipments = shipments;
+    if (filterType === 'pending') {
+      filteredShipments = shipments.filter(s => !s.arrived);
+    } else if (filterType === 'arrived') {
+      filteredShipments = shipments.filter(s => s.arrived);
+    }
+
+    if (filteredShipments.length === 0) {
+      container.innerHTML = `
+        <div class="text-center py-8 text-gray-500">
+          <svg class="w-12 h-12 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4-8-4m16 0v10l-8 4-8-4V7"/>
+          </svg>
+          <p>No ${filterType} shipments found</p>
+          ${filterType === 'pending' ? '<p class="text-sm text-gray-400 mt-2">Shipments are created in the Inventory page</p>' : ''}
+        </div>
+      `;
+      return;
+    }
+
+    // Sort by ETA (most recent first)
+    filteredShipments.sort((a, b) => new Date(b.eta) - new Date(a.eta));
+
+    container.innerHTML = filteredShipments.map(shipment => {
+      const isOverdue = !shipment.arrived && new Date(shipment.eta) < new Date();
+      const daysUntilETA = Math.ceil((new Date(shipment.eta) - new Date()) / (1000 * 60 * 60 * 24));
+      
+      return `
+        <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-700 transition">
+          <div class="flex justify-between items-start mb-3">
+            <div class="flex-1">
+              <h4 class="font-semibold text-gray-900 dark:text-gray-100">${shipment.shipmentId || 'No ID'}</h4>
+              <p class="text-sm text-gray-600 dark:text-gray-400">${shipment.vendor} • ${shipment.shipType} • ${shipment.port}</p>
+            </div>
+            <div class="flex items-center gap-2">
+              ${shipment.arrived ? `
+                <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                  Arrived
+                </span>
+              ` : isOverdue ? `
+                <span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+                  Overdue
+                </span>
+              ` : `
+                <span class="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+                  In Transit
+                </span>
+              `}
+            </div>
+          </div>
+          
+          <div class="flex justify-between items-center text-sm text-gray-600 dark:text-gray-400 mb-3">
+            <span>ETA: ${new Date(shipment.eta).toLocaleDateString()}</span>
+            ${!shipment.arrived ? `
+              <span class="${isOverdue ? 'text-red-600' : 'text-blue-600'}">
+                ${isOverdue ? `${Math.abs(daysUntilETA)} days overdue` : `${daysUntilETA} days to go`}
+              </span>
+            ` : `
+              <span class="text-green-600">
+                Arrived ${shipment.actualArrivalDate ? new Date(shipment.actualArrivalDate).toLocaleDateString() : 'Recently'}
+              </span>
+            `}
+          </div>
+          
+          <!-- Products -->
+          <div class="flex flex-wrap gap-2 mb-3">
+            ${(shipment.products || []).map(p => `
+              <span class="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-600 text-gray-800 dark:text-gray-200 rounded">
+                ${p.model} (${p.qty})
+              </span>
+            `).join('')}
+          </div>
+          
+          <!-- Milestones -->
+          <div class="flex items-center gap-2">
+            ${(shipment.milestones || []).map((milestone, index) => `
+              <div class="flex items-center">
+                <div class="w-3 h-3 rounded-full ${milestone.complete ? 'bg-green-500' : 'bg-gray-300'}" 
+                     title="${milestone.name}"></div>
+                ${index < shipment.milestones.length - 1 ? `
+                  <div class="w-4 h-px ${milestone.complete ? 'bg-green-500' : 'bg-gray-300'} mx-1"></div>
+                ` : ''}
+              </div>
+            `).join('')}
+          </div>
+          
+          <!-- REMOVED: Action buttons since dialog functions don't exist in dashboard -->
+          <div class="mt-3 pt-2 border-t border-gray-100 dark:border-gray-700">
+            <p class="text-xs text-gray-500">
+              Manage shipments in the Inventory page
+            </p>
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+  } catch (error) {
+    console.error('Error loading shipments:', error);
+    container.innerHTML = `
+      <div class="text-center py-8 text-red-500">
+        <p>Error loading shipments: ${error.message}</p>
+        <button onclick="populateShipmentsList('${filterType}')" class="mt-2 text-sm underline">
+          Try Again
+        </button>
+      </div>
+    `;
   }
 }
