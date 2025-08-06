@@ -1,14 +1,73 @@
 import { loadInventory } from "../js/inventory.js";
 import { loadShipments } from "../js/shipments.js";
-import { getCurrentUserRole } from './utils/users.js';
-import { can } from './utils/permissions.js';
+import { checkPageAccess, renderAccessDenied } from './core.js';
 import { showToast } from './core.js';
 import { 
   getDashboardStats, 
   loadSettings,
-  getLocationsByParent,
-  getParentContainerById 
 } from "../js/settings.js";
+
+if (document.body.dataset.page === "dashboard") {
+  showLoadingScreen();
+  updateLoadingProgress('Initializing dashboard...');
+}
+
+function showLoadingScreen() {
+  const existingLoader = document.getElementById('dashboardLoadingScreen');
+  if (existingLoader) {
+    existingLoader.remove();
+  }
+
+  // Create loading screen HTML
+  const loadingHTML = `
+    <div id="dashboardLoadingScreen" class="fixed inset-0 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 flex items-center justify-center z-50">
+      <div class="text-center">
+        <!-- Pulsating Logo -->
+        <div class="loading-pulse mb-8">
+          <div class="w-24 h-24 mx-auto bg-white rounded-2xl flex items-center justify-center shadow-2xl">
+            <svg class="w-16 h-16 text-purple-600" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+          </div>
+        </div>
+        
+        <!-- Loading Text -->
+        <h2 class="text-3xl font-bold text-white mb-4">CheckMate</h2>
+        <p class="text-purple-200 text-lg mb-8">Loading Dashboard</p>
+        
+        <!-- Loading Dots -->
+        <div class="flex justify-center space-x-2">
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+        </div>
+        
+        <!-- Progress Text -->
+        <p id="dashboardLoadingProgress" class="text-purple-300 mt-6 text-sm">Initializing...</p>
+      </div>
+    </div>
+  `;
+
+  document.body.insertAdjacentHTML('beforeend', loadingHTML);
+}
+
+function hideLoadingScreen() {
+  const loadingScreen = document.getElementById('dashboardLoadingScreen');
+  if (loadingScreen) {
+    loadingScreen.style.opacity = '0';
+    loadingScreen.style.transition = 'opacity 0.5s ease-out';
+    setTimeout(() => {
+      loadingScreen.remove();
+    }, 500);
+  }
+}
+
+function updateLoadingProgress(message) {
+  const progressElement = document.getElementById('dashboardLoadingProgress');
+  if (progressElement) {
+    progressElement.textContent = message;
+  }
+}
 
 // 1. Stat Cards Data Aggregation
 function injectDashboardPage() {
@@ -422,7 +481,7 @@ function renderStatusPills(statusMap, chartLabels, chartColors, onClickStatus) {
     if (typeof ChartDataLabels !== 'undefined') {
       try {
         // Register plugin only for this chart instance
-        chartConfig.plugins = [ChartDataLabels];
+        Chart.register(ChartDataLabels); // Add this line
         chartConfig.options.plugins.datalabels = {
           color: ['#ffffff', '#6b7280'],
           font: { weight: 'bold', size: 16 },
@@ -588,62 +647,87 @@ function renderShipmentCountdown(nextTs) {
 
 async function renderAgingAlerts(stats, inventory) {
   const list = document.getElementById('agingList');
-  if (stats.overdueCount === 0) {
-    return list.innerHTML = '<li class="text-gray-500">No overdue items</li>';
-  }
+  if (!list) return;
   
+  // FIXED: Use the overdueCount from stats, but also manually calculate for display
   const now = Date.now();
-  const threshold = 14 * 24 * 60 * 60 * 1000; // 14 days
-
-  // Get contractor info from settings
   const settings = await loadSettings();
   const contractorNames = (settings.contractors || []).map(c => c.name);
 
-  // Find overdue items - check both assignedDate and contractor assignment
-  const overdueItems = inventory.filter(i => {
+  // Find overdue items - items with contractors for > 14 days
+  const overdueItems = inventory.filter(unit => {
     // Must have an assigned date
-    if (!i.assignedDate) return false;
+    if (!unit.assignedDate) return false;
     
-    // Must be assigned to a contractor (check multiple ways)
-    const isAssignedToContractor = 
-      contractorNames.includes(i.location) || // Location matches contractor name
-      i.contractorId || // Has contractor ID
-      i.status === 'Reserved'; // Has reserved status
+    // Must be assigned to a contractor
+    const location = settings.locations?.find(loc => loc.name === unit.location);
+    const isWithContractor = 
+      contractorNames.includes(unit.location) || // Location matches contractor name
+      (location?.parent === "contractor") || // Location has contractor parent
+      unit.contractorId || // Has contractor ID field
+      unit.status === 'Reserved'; // Has reserved status
     
-    if (!isAssignedToContractor) return false;
+    if (!isWithContractor) return false;
     
-    // Check if overdue
-    const assignedTime = new Date(i.assignedDate).getTime();
+    // Check if overdue (> 14 days)
+    const assignedTime = new Date(unit.assignedDate).getTime();
     const daysPassed = (now - assignedTime) / (1000 * 60 * 60 * 24);
     
     return daysPassed > 14;
   });
 
-  console.log('Overdue items found:', overdueItems.length); // Debug log
+  console.log('Overdue items found:', overdueItems.length, 'Expected from stats:', stats.overdueCount);
 
   if (overdueItems.length === 0) {
-    list.innerHTML = '<li class="text-gray-500">No overdue contractor assignments</li>';
+    list.innerHTML = '<div class="text-gray-500 text-sm">No overdue contractor assignments</div>';
     return;
   }
 
+  // Sort by most overdue first
+  overdueItems.sort((a, b) => new Date(a.assignedDate) - new Date(b.assignedDate));
+
   list.innerHTML = overdueItems
-    .map(i => {
-      const daysPassed = Math.floor((now - new Date(i.assignedDate).getTime()) / (1000 * 60 * 60 * 24));
+    .slice(0, 5) // Show only top 5 most overdue
+    .map(unit => {
+      const daysPassed = Math.floor((now - new Date(unit.assignedDate).getTime()) / (1000 * 60 * 60 * 24));
+      const contractor = contractorNames.find(name => name === unit.location) || 
+                        settings.contractors?.find(c => c.id === unit.contractorId)?.name ||
+                        unit.location;
+      
       return `
-        <li class="flex justify-between items-center p-2 bg-red-50 dark:bg-red-900 rounded">
-          <div>
-            <span class="font-medium">Charger ${i.chargerId}</span>
-            <span class="text-sm text-gray-600 dark:text-gray-400">
-              → ${i.location}
-            </span>
+        <div class="flex justify-between items-center p-3 bg-red-50 dark:bg-red-900 rounded-lg border-l-4 border-red-500">
+          <div class="flex-1 min-w-0">
+            <div class="font-medium text-red-900 dark:text-red-100 truncate">
+              ${unit.chargerId}
+            </div>
+            <div class="text-sm text-red-700 dark:text-red-300 truncate">
+              ${contractor}
+            </div>
+            <div class="text-xs text-red-600 dark:text-red-400">
+              Assigned: ${new Date(unit.assignedDate).toLocaleDateString()}
+            </div>
           </div>
-          <div class="text-sm text-red-600 dark:text-red-400">
-            ${daysPassed} days overdue
+          <div class="text-right flex-shrink-0">
+            <div class="text-lg font-bold text-red-600 dark:text-red-400">
+              ${daysPassed}
+            </div>
+            <div class="text-xs text-red-500">
+              days overdue
+            </div>
           </div>
-        </li>
+        </div>
       `;
     })
     .join('');
+
+  // Show summary if there are more than 5
+  if (overdueItems.length > 5) {
+    list.insertAdjacentHTML('beforeend', `
+      <div class="text-center p-2 text-sm text-gray-500">
+        +${overdueItems.length - 5} more overdue assignments
+      </div>
+    `);
+  }
 }
 
 async function renderLocationStackedBar(locStats, inventory) {
@@ -1128,6 +1212,18 @@ function updateQuickStats(locationData) {
   `;
 }
 
+function showUnitsForModel(location, model) {
+  // This function is called from the location breakdown modal
+  console.log(`Showing units for ${model} in ${location}`);
+  showToast(`Viewing ${model} units in ${location}`, 'blue');
+}
+
+function showAllUnitsForLocation(location) {
+  // This function is called from the location breakdown modal
+  console.log(`Showing all units for ${location}`);
+  showToast(`Viewing all units in ${location}`, 'blue');
+}
+
 // Enhanced location breakdown modal
 function showLocationBreakdown(location, data) {
   let dialog = document.getElementById('chargerListDialog');
@@ -1239,72 +1335,67 @@ async function showChargerListForStatus(status) {
   }
   
 // Update the main loader
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   if (document.body.dataset.page === "dashboard") {
+    showLoadingScreen();
+    updateLoadingProgress('Checking permissions...');
+    
+    // Check if user has access to dashboard
+    const hasAccess = await checkPageAccess('viewDashboard');
+    if (!hasAccess) {
+      hideLoadingScreen();
+      renderAccessDenied('#main-content');
+      return;
+    }
+    
+    updateLoadingProgress('Loading dashboard data...');
+    
     waitForMainContent(async () => {
-      showLoadingScreen();
-      updateLoadingProgress('Checking permissions...');
-      // Check permissions
-      const canViewDashboard = await can('viewDashboard');
-      if (!canViewDashboard) {
-        document.getElementById('main-content').innerHTML = `
-          <div class="flex items-center justify-center h-64">
-            <div class="text-center">
-              <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">Access Denied</h2>
-              <p class="text-gray-500 dark:text-gray-400">You don't have permission to view the dashboard.</p>
-            </div>
-          </div>
-        `;
-        return;
+      try {
+        injectDashboardPage();
+        
+        updateLoadingProgress('Loading inventory...');
+        const inventory = await loadInventory();
+        console.log('Dashboard: Loaded inventory items:', inventory.length);
+        
+        updateLoadingProgress('Loading shipments...');
+        const shipments = await loadShipments();
+        console.log('Dashboard: Loaded shipments:', shipments.length);
+        
+        updateLoadingProgress('Calculating statistics...');
+        const stats = await getDashboardStats(inventory, shipments);
+        console.log('Dashboard: Calculated stats:', stats);
+        
+        updateLoadingProgress('Rendering components...');
+        await renderStatCards(stats, inventory);
+        console.log('Dashboard: Rendered stat cards');
+        
+        renderStatusDonut(stats.byStatus, stats.byStatus);
+        console.log('Dashboard: Rendered status donut');
+        
+        renderLostMeter(stats, inventory);
+        console.log('Dashboard: Rendered lost meter');
+        renderShipmentCountdown(stats.nextShipment);
+        await renderAgingAlerts(stats, inventory);
+        await renderLocationStackedBar({}, inventory);
+        await initializeShipmentsSection();
+        
+        // Set up refresh button
+        document.getElementById('refreshDashboard')?.addEventListener('click', refreshDashboard);
+        
+        updateLoadingProgress('Dashboard ready!');
+        // Reveal the body and fade out loader only after everything is ready
+        document.body.style.visibility = 'visible';
+        setTimeout(() => hideLoadingScreen(), 500);
+        
+      } catch (error) {
+        console.error("Dashboard loading error:", error);
+        hideLoadingScreen();
+        showToast("Failed to load dashboard", "red");
       }
-
-      updateLoadingProgress('Injecting dashboard layout...');
-      injectDashboardPage();
-      
-      updateLoadingProgress('Loading inventory data...');
-      const inventory = await loadInventory();
-      
-      updateLoadingProgress('Loading shipments...');
-      const shipments = await loadShipments();
-
-      updateLoadingProgress('Initializing shipments...');
-      await initializeShipmentsSection();
-      
-      updateLoadingProgress('Calculating statistics...');
-      const stats = await getDashboardStats(inventory, shipments);
-      
-      updateLoadingProgress('Rendering components...');
-      await renderStatCards(stats, inventory);
-      renderShipmentCountdown(stats.nextShipment);
-      await renderAgingAlerts(stats, inventory);
-      
-            // FIXED: Store original data for reset functionality
-            renderStatusDonut(stats.byStatus, stats.byStatus);
-            if (window.statusChart) {
-              window.statusChart.originalByStatus = stats.byStatus;
-            }
-            
-            renderLostMeter(stats, inventory);
-            await renderLocationStackedBar(null, inventory);
-            
-            updateLoadingProgress('Setting up event handlers...');
-            // Add refresh functionality
-            document.getElementById('refreshDashboard').addEventListener('click', async () => {
-              await refreshDashboard();
-            });
-            
-            // Update last updated time
-            document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
-            
-            updateLoadingProgress('Dashboard ready!');
-            
-            // Hide loading screen after a brief delay
-            setTimeout(() => {
-              hideLoadingScreen();
-            }, 500);
-          });
-        }
-      });
+    });
+  }
+});
 
       async function refreshDashboard() {
         showLoadingScreen();
@@ -1364,64 +1455,6 @@ document.addEventListener('DOMContentLoaded', () => {
           `;
         }
       }
-
-
-function showLoadingScreen() {
-  const existingLoader = document.getElementById('dashboardLoadingScreen');
-  if (existingLoader) {
-    existingLoader.remove();
-  }
-
-  // Create loading screen HTML
-  const loadingHTML = `
-    <div id="dashboardLoadingScreen" class="fixed inset-0 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 flex items-center justify-center z-50">
-      <div class="text-center">
-        <!-- Pulsating Logo -->
-        <div class="loading-pulse mb-8">
-          <div class="w-24 h-24 mx-auto bg-white rounded-2xl flex items-center justify-center shadow-2xl">
-            <svg class="w-16 h-16 text-purple-600" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-            </svg>
-          </div>
-        </div>
-        
-        <!-- Loading Text -->
-        <h2 class="text-3xl font-bold text-white mb-4">CheckMate</h2>
-        <p class="text-purple-200 text-lg mb-8">Loading Dashboard</p>
-        
-        <!-- Loading Dots -->
-        <div class="flex justify-center space-x-2">
-          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
-          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
-          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
-        </div>
-        
-        <!-- Progress Text -->
-        <p id="dashboardLoadingProgress" class="text-purple-300 mt-6 text-sm">Initializing...</p>
-      </div>
-    </div>
-  `;
-
-  document.body.insertAdjacentHTML('beforeend', loadingHTML);
-}
-
-function hideLoadingScreen() {
-  const loadingScreen = document.getElementById('dashboardLoadingScreen');
-  if (loadingScreen) {
-    loadingScreen.style.opacity = '0';
-    loadingScreen.style.transition = 'opacity 0.5s ease-out';
-    setTimeout(() => {
-      loadingScreen.remove();
-    }, 500);
-  }
-}
-
-function updateLoadingProgress(message) {
-  const progressElement = document.getElementById('dashboardLoadingProgress');
-  if (progressElement) {
-    progressElement.textContent = message;
-  }
-}
 
 async function initializeShipmentsSection() {
   try {

@@ -13,9 +13,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="/assets/css/style.css" />
     <style>
-      body { visibility: hidden; }
+      /* FIXED: Temporarily show body for debugging */
+      body { visibility: visible; }
       
-      /* Loading animation styles - EXACT SAME AS INDEX */
+      /* Loading animation styles */
       .loading-pulse {
         animation: pulse 1.5s ease-in-out infinite;
       }
@@ -49,8 +50,14 @@
       .loading-dots:nth-child(3) { animation-delay: 0s; }
     </style>
 </head>
-<body data-page="audit">
-  <!-- Main content will be injected by shell -->
+<body data-page="audit" class="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+  <!-- Initial loading placeholder (will be removed by JS) -->
+  <div id="initialLoader" class="p-6">
+    <div class="text-center py-8">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto"></div>
+      <p class="mt-2 text-gray-600 dark:text-gray-400">Loading audit system...</p>
+    </div>
+  </div>
   
   <!-- Firebase SDK + initialize MUST come before any module -->
   <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-app-compat.js"></script>
@@ -58,16 +65,17 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore-compat.js"></script>
   <script>
     const firebaseConfig = {
-  apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMiJl5Uo",
-  authDomain: "checkmate-enova.firebaseapp.com",
-  projectId: "checkmate-enova",
-  storageBucket: "checkmate-enova.firebasestorage.app",
-  messagingSenderId: "1036780232884",
-  appId: "1:1036780232884:web:689229ef07859db22e77e1"
-};
+      apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMiJl5Uo",
+      authDomain: "checkmate-enova.firebaseapp.com",
+      projectId: "checkmate-enova",
+      storageBucket: "checkmate-enova.firebasestorage.app",
+      messagingSenderId: "1036780232884",
+      appId: "1:1036780232884:web:689229ef07859db22e77e1"
+    };
     firebase.initializeApp(firebaseConfig);
-    window.db   = firebase.firestore();
+    window.db = firebase.firestore();
     window.auth = firebase.auth();
+    console.log('Firebase initialized for audit page');
   </script>
 
   <!-- Load modules -->

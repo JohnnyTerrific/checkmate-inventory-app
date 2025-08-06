@@ -46,7 +46,7 @@
 </head>
 <body data-page="home">
   <!-- Loading Screen -->
-  <div id="loadingScreen" class="fixed inset-0 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 flex items-center justify-center z-50">
+  <div id="loadingScreen" class="fixed inset-0 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 flex items-center justify-center z-50" style="display: none;">
     <div class="text-center">
       <!-- Pulsating Logo -->
       <div class="loading-pulse mb-8">
@@ -142,8 +142,18 @@
  </script>
 
   
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script type="module" src="/js/core.js"></script>
-  <script type="module" src="/js/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  // Ensure Chart.js is available
+  window.addEventListener('load', () => {
+    if (typeof Chart === 'undefined') {
+      console.error('Chart.js failed to load');
+    } else {
+      console.log('Chart.js loaded successfully');
+    }
+  });
+</script>
+<script type="module" src="/js/core.js"></script>
+<script type="module" src="/js/index.js"></script>
 </body>
 </html>

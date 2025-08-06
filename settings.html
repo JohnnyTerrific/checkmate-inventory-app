@@ -76,7 +76,8 @@
    firebase.initializeApp(firebaseConfig);
    window.db   = firebase.firestore();
    window.auth = firebase.auth();
- </script>
+   console.log('Firebase initialized for settings page');
+  </script>
      <!-- 3) Modules (after Firebase) -->
      <script type="module" src="/js/core.js"></script>
      <script type="module" src="/js/settings.js"></script>

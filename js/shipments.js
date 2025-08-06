@@ -1,25 +1,14 @@
-import { showToast } from '../js/core.js';
+import { showToast } from './core.js';
 import { loadInventory, saveInventory } from './inventory.js';
-import { getCurrentUserEmail } from './utils/users.js'; // Add this import
-import { db } from './utils/firebase.js';
-import { 
-  collection, 
-  addDoc, 
-  getDocs, 
-  doc, 
-  updateDoc, 
-  deleteDoc, 
-  query, 
-  orderBy, 
-  where 
-} from 'firebase/firestore';
+import { getCurrentUserEmail } from './utils/users.js';
 
 // Firestore Operations
 export async function loadShipments() {
   try {
-    const shipmentsRef = collection(db, 'shipments');
-    const q = query(shipmentsRef, orderBy('departure', 'desc'));
-    const snapshot = await getDocs(q);
+    // Use window.db consistently instead of mixing v8/v9 syntax
+    const snapshot = await window.db.collection('shipments')
+      .orderBy('departure', 'desc')
+      .get();
     
     return snapshot.docs.map(doc => ({
       id: doc.id,
@@ -37,8 +26,7 @@ export async function loadShipments() {
 
 export async function saveShipment(shipmentData) {
   try {
-    const shipmentsRef = collection(db, 'shipments');
-    const docRef = await addDoc(shipmentsRef, {
+    const docRef = await window.db.collection('shipments').add({
       ...shipmentData,
       created: new Date().toISOString(),
       lastUpdated: new Date().toISOString()
@@ -83,25 +71,18 @@ export async function deleteShipment(shipmentId) {
 export async function getArrivingShipments() {
   try {
     const today = new Date();
-    today.setHours(23, 59, 59, 999); // End of today
-    const todayISO = today.toISOString();
+    today.setHours(23, 59, 59, 999);
     
-    const shipmentsRef = collection(db, 'shipments');
+    // Use window.db consistently
+    const snapshot = await window.db.collection('shipments')
+      .where('arrived', '==', false)
+      .get();
     
-    // FIXED: Use separate queries to avoid composite index requirement
-    // First get all non-arrived shipments
-    const q1 = query(
-      shipmentsRef,
-      where('arrived', '==', false)
-    );
-    
-    const snapshot = await getDocs(q1);
     const allPending = snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
     }));
     
-    // Then filter client-side for ETA
     const arriving = allPending.filter(shipment => {
       if (!shipment.eta) return false;
       const etaDate = new Date(shipment.eta);
@@ -109,7 +90,6 @@ export async function getArrivingShipments() {
     });
     
     return arriving;
-    
   } catch (error) {
     console.error('Error getting arriving shipments:', error);
     return [];
@@ -540,31 +520,60 @@ window.openShipmentDialog = openShipmentDialog;
 
 // Notification system integration
 export async function checkForArrivingShipments() {
-  const arrivingShipments = await getArrivingShipments();
-  
-  if (arrivingShipments.length > 0) {
-    // Show notification for arriving shipments
-    const message = `${arrivingShipments.length} shipment(s) have arrived or are overdue!`;
-    showToast(message, 'orange');
+  try {
+    const arrivingShipments = await getArrivingShipments();
     
-    // You can also trigger more sophisticated notifications here
-    // For example, browser notifications if permission is granted
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('CheckMate - Shipments Alert', {
-        body: message,
-        icon: '/img/CheckMate-app-logo-light.png'
-      });
+    // FIXED: Always clear cached shipments first
+    window._arrivingShipments = [];
+    
+    // Only show notification if there are actually arriving shipments
+    if (arrivingShipments && arrivingShipments.length > 0) {
+      const message = `${arrivingShipments.length} shipment(s) have arrived or are overdue!`;
+      showToast(message, 'orange');
+      window._arrivingShipments = arrivingShipments;
+      console.log('Arriving shipments detected:', arrivingShipments.length);
+    } else {
+      // FIXED: Explicitly log when no shipments found
+      console.log('No arriving shipments found, clearing notifications');
     }
+  } catch (error) {
+    console.error('Error checking for arriving shipments:', error);
+    // Clear stored shipments on error
+    window._arrivingShipments = [];
   }
-  
-  return arrivingShipments;
 }
 
-// Initialize notification checking when module loads
-if (document.body.dataset.page === 'dashboard' || document.body.dataset.page === 'inventory') {
-  // Check for arriving shipments every 5 minutes
-  setInterval(checkForArrivingShipments, 5 * 60 * 1000);
+export function clearShipmentNotifications() {
+  window._arrivingShipments = [];
+  console.log('Shipment notifications cleared');
+}
+
+function initializeShipmentNotifications() {
+  // Only check for notifications if we're on relevant pages
+  const currentPage = document.body.dataset.page;
+  if (!['dashboard', 'inventory'].includes(currentPage)) {
+    return;
+  }
   
-  // Check immediately on load
-  checkForArrivingShipments();
+  // Reduce frequency on mobile to avoid performance issues
+  const isMobile = window.innerWidth < 900;
+  const checkInterval = isMobile ? 10 * 60 * 1000 : 5 * 60 * 1000; // 10 min mobile, 5 min desktop
+  
+  // Check immediately on load with delay to avoid race conditions
+  setTimeout(() => {
+    checkForArrivingShipments();
+  }, 3000); // 3 second delay
+  
+  // Set up periodic checking
+  setInterval(checkForArrivingShipments, checkInterval);
+}
+
+if (typeof window !== 'undefined') {
+  // Wait for DOM to be ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeShipmentNotifications);
+  } else {
+    // DOM is already ready
+    setTimeout(initializeShipmentNotifications, 1000);
+  }
 }

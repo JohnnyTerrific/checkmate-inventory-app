@@ -4,14 +4,29 @@ import { loadProducts } from './products.js';
 import { loadInventory } from './inventory.js';
 import { loadSettings } from './settings.js';
 import { loadAuditLog } from './inventory.js';
-import { getCurrentUserRole, getCurrentUserProfile } from './utils/users.js'; // FIXED: Added getCurrentUserProfile
-import { can } from './utils/permissions.js';
-
+import { getCurrentUserProfile, getCurrentUserRole } from './utils/users.js'; // FIXED: Added getCurrentUserRole
+import { checkPageAccess, renderAccessDenied } from './core.js';
 
 function checkMobileAndRedirect() {
   const isMobile = window.innerWidth < 768;
+  
+  // Check if we're explicitly allowing index access (from logo click)
+  const allowIndexAccess = sessionStorage.getItem('allowIndexAccess');
+  if (allowIndexAccess) {
+    sessionStorage.removeItem('allowIndexAccess');
+    console.log('Index access explicitly allowed, not redirecting');
+    return false;
+  }
+  
+  // Prevent redirect loops
+  const isRedirecting = sessionStorage.getItem('isRedirecting');
+  if (isRedirecting) {
+    sessionStorage.removeItem('isRedirecting');
+    console.log('Already redirecting, preventing loop');
+    return false;
+  }
+  
   if (isMobile) {
-    // Get user role from localStorage if available (set during login)
     const lastUserRole = localStorage.getItem('userRole');
     
     console.log('Mobile device detected, checking user role:', lastUserRole);
@@ -19,26 +34,23 @@ function checkMobileAndRedirect() {
     // For Agents, always redirect to inventory
     if (lastUserRole === 'Agent') {
       console.log('Agent user on mobile, redirecting to inventory');
+      sessionStorage.setItem('isRedirecting', 'true');
       window.location.href = "/inventory.html";
       return true;
     }
     
-    // For privileged users, check if they have a preference
-    const mobilePreference = localStorage.getItem('mobileStartPage');
-    if (mobilePreference) {
-      window.location.href = mobilePreference;
+    // For other users, redirect to inventory unless they're specifically accessing index
+    if (window.location.pathname === '/' || window.location.pathname === '/index.html') {
+      console.log('Mobile user accessing index, redirecting to inventory');
+      sessionStorage.setItem('isRedirecting', 'true');
+      window.location.href = "/inventory.html";
       return true;
     }
-    
-    // Default to inventory for mobile
-    console.log('Mobile user, redirecting to inventory by default');
-    window.location.href = "/inventory.html";
-    return true;
   }
   return false;
 }
 
-// Update onAuthStateChanged
+// FIXED: Update onAuthStateChanged to properly handle role checking
 onAuthStateChanged(auth, async user => {
   if (!user) {
     window.location.href = "/login.html";
@@ -47,6 +59,14 @@ onAuthStateChanged(auth, async user => {
     const userProfile = await getCurrentUserProfile();
     if (userProfile) {
       localStorage.setItem('userRole', userProfile.role);
+    }
+    
+    // FIXED: Check if Agent is trying to access this page before mobile redirect
+    const userRole = await getCurrentUserRole();
+    if (userRole === 'Agent') {
+      console.log('Agent detected, redirecting to inventory');
+      window.location.href = "/inventory.html";
+      return;
     }
     
     // Check mobile redirect before initializing dashboard
@@ -58,64 +78,172 @@ onAuthStateChanged(auth, async user => {
   }
 });
 
-// Loading progress helper
+document.addEventListener('DOMContentLoaded', () => {
+  // Handle logo clicks to prevent mobile redirect loop
+  const logoElements = document.querySelectorAll('.logo, [onclick*="index.html"], [href="index.html"], [href="/"]');
+  logoElements.forEach(logo => {
+    logo.addEventListener('click', (e) => {
+      const isMobile = window.innerWidth < 768;
+      const userRole = localStorage.getItem('userRole');
+      
+      if (isMobile && userRole === 'Agent') {
+        e.preventDefault();
+        showToast('Mobile agents should stay on inventory page', 'blue');
+        return;
+      }
+      
+      if (isMobile) {
+        // Set flag to allow index access
+        sessionStorage.setItem('allowIndexAccess', 'true');
+      }
+    });
+  });
+});
+
+function showLoadingScreen() {
+  // Remove any existing loader first
+  const existingLoader = document.getElementById('indexLoadingScreen');
+  if (existingLoader) {
+    existingLoader.remove();
+  }
+
+  const loadingHTML = `
+    <div id="indexLoadingScreen" class="fixed inset-0 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 flex items-center justify-center z-50">
+      <div class="text-center">
+        <div class="loading-pulse mb-8">
+          <div class="w-24 h-24 mx-auto bg-white rounded-2xl flex items-center justify-center shadow-2xl">
+            <svg class="w-16 h-16 text-purple-600" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+          </div>
+        </div>
+        
+        <h2 class="text-3xl font-bold text-white mb-4">CheckMate</h2>
+        <p class="text-purple-200 text-lg mb-8">Loading Executive Dashboard</p>
+        
+        <div class="flex justify-center space-x-2">
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+        </div>
+        
+        <p id="indexLoadingProgress" class="text-purple-300 mt-6 text-sm">Initializing...</p>
+      </div>
+    </div>
+  `;
+
+  document.body.insertAdjacentHTML('beforeend', loadingHTML);
+}
+
+function hideLoadingScreen() {
+  const loadingScreen = document.getElementById('indexLoadingScreen');
+  if (loadingScreen) {
+    loadingScreen.style.opacity = '0';
+    loadingScreen.style.transition = 'opacity 0.5s ease-out';
+    setTimeout(() => {
+      loadingScreen.remove();
+    }, 500);
+  }
+}
+
 function updateLoadingProgress(message) {
-  const progressElement = document.getElementById('loadingProgress');
+  const progressElement = document.getElementById('indexLoadingProgress');
   if (progressElement) {
     progressElement.textContent = message;
   }
 }
 
-function hideLoadingScreen() {
-  const loadingScreen = document.getElementById('loadingScreen');
-  if (loadingScreen) {
-    loadingScreen.style.opacity = '0';
-    loadingScreen.style.transition = 'opacity 0.5s ease-out';
-    setTimeout(() => {
-      loadingScreen.style.display = 'none';
-    }, 500);
-  }
-}
-
 async function initializeIndexPageContent() {
   try {
-    updateLoadingProgress('Loading products...');
-    const products = await loadProducts();
-    updateLoadingProgress('Loading inventory...');
-    const inventory = await loadInventory();
-    updateLoadingProgress('Loading settings...');
-    const settings = await loadSettings();
-    updateLoadingProgress('Loading audit log...');
-    const auditLog = await loadAuditLog();
-
-    window.inventory = inventory;
-    const businessMetrics = await calculateBusinessMetrics(inventory, products, settings, auditLog);
-
-    updateLoadingProgress('Rendering KPIs...');
-    renderExecutiveKPIs(businessMetrics);
-
-    updateLoadingProgress('Rendering charts...');
-    await Promise.all([
-      new Promise(resolve => renderAssetDistributionChart(businessMetrics, resolve)),
-      renderDeploymentPipeline(businessMetrics.pipeline),
-      renderDepreciationAnalysis(businessMetrics.depreciation),
-      renderAssetHealthMetrics(businessMetrics.health),
-      renderGrowthTrajectory(businessMetrics.growth)
-    ]);
-
-    updateLoadingProgress('Finalizing...');
-    // Fade in main content
-    const main = document.getElementById('main-content-area');
-    if (main) {
-      main.classList.remove('opacity-0', 'pointer-events-none');
-      main.classList.add('opacity-100');
+    // Hide any existing static loader first
+    const staticLoader = document.getElementById('loadingScreen');
+    if (staticLoader) {
+      staticLoader.style.display = 'none';
     }
-    setTimeout(() => hideLoadingScreen(), 200); // Small delay for smoothness
+    
+    showLoadingScreen();
+    updateLoadingProgress('Checking permissions...');
+    
+    const startTime = Date.now();
+    const minLoadingTime = 2000; // Reduced from 3000
+    
+    // FIXED: Better access checking with proper error handling
+    const hasAccess = await checkPageAccess('viewIndex');
+    if (!hasAccess) {
+      hideLoadingScreen();
+      renderAccessDenied('#main-content-area');
+      return;
+    }
+
+    // FIXED: Add error handling for data loading
+    try {
+      updateLoadingProgress('Loading inventory data...');
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const inventory = await loadInventory();
+      
+      updateLoadingProgress('Loading products...');
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const products = await loadProducts();
+      
+      updateLoadingProgress('Loading settings...');
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const settings = await loadSettings();
+      
+      updateLoadingProgress('Loading audit log...');
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const auditLog = await loadAuditLog();
+
+      // Validate data before proceeding
+      if (!inventory || !products || !settings) {
+        throw new Error('Failed to load required data');
+      }
+
+      updateLoadingProgress('Calculating business metrics...');
+      await new Promise(resolve => setTimeout(resolve, 400));
+      const businessMetrics = await calculateBusinessMetrics(inventory, products, settings, auditLog);
+      
+      updateLoadingProgress('Rendering KPI dashboard...');
+      await new Promise(resolve => setTimeout(resolve, 300));
+      renderExecutiveKPIs(businessMetrics);
+
+      updateLoadingProgress('Creating charts and analysis...');
+      
+      await Promise.all([
+        renderAssetDistributionChart(businessMetrics),
+        renderDeploymentPipeline(businessMetrics.pipeline),
+        renderDepreciationAnalysis(businessMetrics.depreciation),
+        renderAssetHealthMetrics(businessMetrics.health),
+        renderGrowthTrajectory(businessMetrics.growth)
+      ]);
+
+      updateLoadingProgress('Finalizing dashboard...');
+      
+      // Ensure minimum loading time has passed
+      const elapsedTime = Date.now() - startTime;
+      const remainingTime = Math.max(0, minLoadingTime - elapsedTime);
+
+      setTimeout(() => {
+        const main = document.getElementById('main-content-area') || 
+                     document.getElementById('main-content') ||
+                     document.querySelector('main');
+        if (main) {
+          main.classList.remove('opacity-0', 'pointer-events-none');
+          main.classList.add('opacity-100');
+        }
+        updateLoadingProgress('Dashboard ready!');
+        setTimeout(() => hideLoadingScreen(), 500);
+      }, remainingTime);
+
+    } catch (dataError) {
+      console.error("Error loading data:", dataError);
+      hideLoadingScreen();
+      showErrorState();
+    }
 
   } catch (error) {
     console.error("Error initializing index page:", error);
-    showErrorState();
     hideLoadingScreen();
+    showErrorState();
   }
 }
 
@@ -421,322 +549,359 @@ function renderExecutiveKPIs(metrics) {
   `).join('');
 }
 
-function renderAssetDistributionChart(metrics, onChartRendered) {
-  const container = document.getElementById('assetDonut');
-  if (!container) {
-    if (onChartRendered) onChartRendered();
-    return;
-  }
-  const ctx = container.getContext('2d');
-  if (window.assetChart) {
-    try { window.assetChart.destroy(); } catch (e) {}
-  }
-  
-  // FIXED: Use value data first, fall back to count only if all values are 0
-  const valueData = [
-    metrics.financial?.revenueAssets?.value || 0,
-    metrics.financial?.idleInventory?.value || 0,
-    metrics.financial?.inTransit?.value || 0
-  ];
-  
-  const countData = [
-    metrics.financial?.revenueAssets?.count || 0,
-    metrics.financial?.idleInventory?.count || 0,
-    metrics.financial?.inTransit?.count || 0
-  ];
-  
-  const totalValue = valueData.reduce((sum, val) => sum + val, 0);
-  const totalCount = countData.reduce((sum, val) => sum + val, 0);
-  
-  // FIXED: Use value data if available, otherwise use count data
-  const useValueData = totalValue > 0;
-  const data = useValueData ? valueData : countData;
-  const total = useValueData ? totalValue : totalCount;
-
-  console.log('Chart data:', {
-    valueData,
-    countData,
-    totalValue,
-    totalCount,
-    useValueData,
-    data
-  });
+function renderAssetDistributionChart(metrics) {
+  return new Promise((resolve) => {
+    const container = document.getElementById('assetDonut');
+    if (!container) {
+      resolve();
+      return;
+    }
     
-  // If no data, show a placeholder
-  if (total === 0) {
-    ctx.clearRect(0, 0, container.width, container.height);
-    ctx.fillStyle = '#9ca3af';
-    ctx.font = '16px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('No asset data available', container.width / 2, container.height / 2);
-    if (onChartRendered) onChartRendered();
-    return;
-  }
+    if (typeof Chart === 'undefined') {
+      console.error('Chart.js not available');
+      container.innerHTML = '<div class="text-center p-4 text-red-500">Chart.js library not loaded</div>';
+      resolve();
+      return;
+    }
 
-  window.assetChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: ['Revenue Assets', 'Idle Inventory', 'In Transit'],
-      datasets: [{
-        data: data,
-        backgroundColor: ['#22c55e', '#f59e0b', '#8b5cf6'],
-        borderColor: ['#16a34a', '#d97706', '#7c3aed'],
-        borderWidth: 2,
-        hoverOffset: 30,
-        hoverBorderWidth: 3,
-        borderRadius: 4,
-        hoverBorderColor: '#ffffff'
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: {
-        duration: 1000,
-        onComplete: () => {
-                    // Show the container after chart is rendered
-                    container.classList.remove('opacity-0');
-                    container.classList.add('opacity-100');
-          if (onChartRendered) onChartRendered();
-        }
+    // Clear any existing chart
+    if (window.assetChart) {
+      try { 
+        window.assetChart.destroy(); 
+        window.assetChart = null;
+      } catch (e) {
+        console.warn('Chart destruction failed:', e);
+      }
+    }
+
+    const ctx = container.getContext('2d');
+    
+    // Prepare data (same as before)
+    const valueData = [
+      metrics.financial?.revenueAssets?.value || 0,
+      metrics.financial?.idleInventory?.value || 0,
+      metrics.financial?.inTransit?.value || 0
+    ];
+    
+    const countData = [
+      metrics.financial?.revenueAssets?.count || 0,
+      metrics.financial?.idleInventory?.count || 0,
+      metrics.financial?.inTransit?.count || 0
+    ];
+    
+    const totalValue = valueData.reduce((sum, val) => sum + val, 0);
+    const totalCount = countData.reduce((sum, val) => sum + val, 0);
+    const useValueData = totalValue > 0;
+    const data = useValueData ? valueData : countData;
+    const total = useValueData ? totalValue : totalCount;
+    
+    if (total === 0) {
+      ctx.clearRect(0, 0, container.width, container.height);
+      ctx.fillStyle = '#9ca3af';
+      ctx.font = '16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('No asset data available', container.width / 2, container.height / 2);
+      resolve();
+      return;
+    }
+
+    window.assetChart = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Revenue Assets', 'Idle Inventory', 'In Transit'],
+        datasets: [{
+          data: data,
+          backgroundColor: ['#22c55e', '#f59e0b', '#8b5cf6'],
+          borderColor: ['#16a34a', '#d97706', '#7c3aed'],
+          borderWidth: 2,
+          hoverOffset: 30,
+          hoverBorderWidth: 3,
+          borderRadius: 4,
+          hoverBorderColor: '#ffffff'
+        }]
       },
-      plugins: {
-        title: {
-          display: true,
-          text: useValueData ? `Total Value: $${total.toLocaleString()}` : `Total Units: ${total}`,
-          font: { size: 18, weight: 'bold' },
-          padding: {
-            bottom: 15
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: {
+          duration: 1000,
+          onComplete: () => {
+            console.log('Asset chart animation complete');
+            resolve(); // FIXED: Properly resolve when animation completes
           }
         },
-        legend: {
-          position: 'bottom',
-          labels: {
-            padding: 25,
-            font: { size: 14 },
-            usePointStyle: true,
-            pointStyle: 'circle'
-          }
-        },
-        tooltip: {
-          backgroundColor: 'rgba(255,255,255,0.95)',
-          titleColor: '#333',
-          bodyColor: '#333',
-          bodyFont: { size: 14 },
-          titleFont: { size: 16 },
-          borderColor: '#ccc',
-          borderWidth: 1,
-          padding: 15,
-          boxPadding: 8,
-          cornerRadius: 6,
-          displayColors: true,
-          callbacks: {
-            label: function(context) {
-              const value = context.raw;
-              const percent = total > 0 ? Math.round(value / total * 100) : 0;
-              
-              if (useValueData) {
-                return `${context.label}: $${value.toLocaleString()} (${percent}%)`;
-              } else {
-                return `${context.label}: ${value} units (${percent}%)`;
+        plugins: {
+          title: {
+            display: true,
+            text: useValueData ? `Total Value: $${total.toLocaleString()}` : `Total Units: ${total}`,
+            font: { size: 18, weight: 'bold' },
+            padding: { bottom: 15 }
+          },
+          legend: {
+            position: 'bottom',
+            labels: {
+              padding: 25,
+              font: { size: 14 },
+              usePointStyle: true,
+              pointStyle: 'circle'
+            }
+          },
+          tooltip: {
+            backgroundColor: 'rgba(255,255,255,0.95)',
+            titleColor: '#333',
+            bodyColor: '#333',
+            bodyFont: { size: 14 },
+            titleFont: { size: 16 },
+            borderColor: '#ccc',
+            borderWidth: 1,
+            padding: 15,
+            boxPadding: 8,
+            cornerRadius: 6,
+            displayColors: true,
+            callbacks: {
+              label: function(context) {
+                const value = context.raw;
+                const percent = total > 0 ? Math.round(value / total * 100) : 0;
+                
+                if (useValueData) {
+                  return `${context.label}: $${value.toLocaleString()} (${percent}%)`;
+                } else {
+                  return `${context.label}: ${value} units (${percent}%)`;
+                }
               }
             }
           }
         }
       }
-    }
+    });
   });
-  
-  console.log('Chart created successfully:', window.assetChart);
 }
 
 function renderDeploymentPipeline(pipeline) {
   return new Promise(resolve => {
-  const container = document.getElementById('milestone-progress');
-  if (!container) return resolve();
-  
-  const stages = [
-    { key: 'warehouse', label: 'Warehouse', color: '#3b82f6' },
-    { key: 'contractor', label: 'With Contractors', color: '#8b5cf6' }, 
-    { key: 'deployed', label: 'Deployed', color: '#22c55e' },
-    { key: 'unknown', label: 'Other', color: '#6b7280' }
-  ];
-  
-  const counts = stages.map(stage => pipeline[stage.key]?.length || 0);
-  const total = counts.reduce((sum, val) => sum + val, 0);
-  
-  container.innerHTML = `
-    <div class="space-y-4">
-      ${stages.map((stage, i) => {
-        const count = counts[i];
-        const percent = total > 0 ? (count / total * 100) : 0;
-        return `
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <div class="w-4 h-4 rounded-full" style="background-color: ${stage.color}"></div>
-              <span class="font-medium">${stage.label}</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <div class="w-32 bg-gray-200 rounded-full h-2">
-                <div class="h-2 rounded-full transition-all duration-500" 
-                     style="width: ${percent}%; background-color: ${stage.color}"></div>
+    const container = document.getElementById('milestone-progress');
+    if (!container) {
+      resolve();
+      return;
+    }
+
+    container.classList.add('opacity-0');
+    
+    const stages = [
+      { key: 'warehouse', label: 'Warehouse', color: '#3b82f6' },
+      { key: 'contractor', label: 'With Contractors', color: '#8b5cf6' }, 
+      { key: 'deployed', label: 'Deployed', color: '#22c55e' },
+      { key: 'unknown', label: 'Other', color: '#6b7280' }
+    ];
+    
+    const counts = stages.map(stage => pipeline[stage.key]?.length || 0);
+    const total = counts.reduce((sum, val) => sum + val, 0);
+    
+    container.innerHTML = `
+      <div class="space-y-4">
+        ${stages.map((stage, i) => {
+          const count = counts[i];
+          const percent = total > 0 ? (count / total * 100) : 0;
+          return `
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-4 h-4 rounded-full" style="background-color: ${stage.color}"></div>
+                <span class="font-medium">${stage.label}</span>
               </div>
-              <span class="font-bold text-lg w-8 text-right">${count}</span>
+              <div class="flex items-center gap-2">
+                <div class="w-32 bg-gray-200 rounded-full h-2">
+                  <div class="h-2 rounded-full transition-all duration-500" 
+                       style="width: ${percent}%; background-color: ${stage.color}"></div>
+                </div>
+                <span class="font-bold text-lg w-8 text-right">${count}</span>
+              </div>
             </div>
-          </div>
-        `;
-      }).join('')}
-    </div>
-    <div class="flex mt-8 justify-center">
-      <div class="text-center py-4 px-8 bg-gray-50 dark:bg-gray-800 rounded-lg shadow-sm">
-        <div class="text-2xl font-bold">${total}</div>
-        <div class="text-sm text-gray-500">Total Units</div>
+          `;
+        }).join('')}
       </div>
-    </div>
-  `;
-      // Show the container after content is added
+      <div class="flex mt-8 justify-center">
+        <div class="text-center py-4 px-8 bg-gray-50 dark:bg-gray-800 rounded-lg shadow-sm">
+          <div class="text-2xl font-bold">${total}</div>
+          <div class="text-sm text-gray-500">Total Units</div>
+        </div>
+      </div>
+    `;
+    
+    // Simulate loading time and resolve
+    setTimeout(() => {
       container.classList.remove('opacity-0');
       container.classList.add('opacity-100');
       resolve();
-});
+    }, 300);
+  });
 }
+
 
 function renderDepreciationAnalysis(depreciation) {
   return new Promise(resolve => {
-  const container = document.getElementById('depreciation-summary');
-  if (!container) return resolve();
-  
-  // Handle case where no depreciation data exists
-  if (!depreciation.assets || depreciation.assets.length === 0) {
+    const container = document.getElementById('depreciation-summary');
+    if (!container) {
+      resolve();
+      return;
+    }
+    
+    if (!depreciation.assets || depreciation.assets.length === 0) {
+      container.innerHTML = `
+        <div class="text-center py-8">
+          <div class="text-gray-500 text-lg">No deployed assets for depreciation analysis</div>
+          <div class="text-sm text-gray-400 mt-2">Assets will appear here once deployed to customers or public locations</div>
+        </div>
+      `;
+      resolve();
+      return;
+    }
+    
+    const depreciationRate = depreciation.totalOriginal > 0 ? 
+      (depreciation.totalDepreciation / depreciation.totalOriginal * 100) : 0;
+    
     container.innerHTML = `
-      <div class="text-center py-8">
-        <div class="text-gray-500 text-lg">No deployed assets for depreciation analysis</div>
-        <div class="text-sm text-gray-400 mt-2">Assets will appear here once deployed to customers or public locations</div>
+      <div class="grid md:grid-cols-3 gap-6">
+        <div class="text-center">
+          <div class="text-3xl font-bold text-blue-600">$${depreciation.totalOriginal.toLocaleString()}</div>
+          <div class="text-sm text-gray-500">Original Value</div>
+        </div>
+        <div class="text-center">
+          <div class="text-3xl font-bold text-purple-600">$${depreciation.totalDepreciation.toLocaleString()}</div>
+          <div class="text-sm text-gray-500">Total Depreciation</div>
+        </div>
+        <div class="text-center">
+          <div class="text-3xl font-bold text-green-600">$${depreciation.totalCurrent.toLocaleString()}</div>
+          <div class="text-sm text-gray-500">Current Value</div>
+        </div>
+      </div>
+      <div class="mt-4 text-center">
+        <div class="text-lg font-semibold">
+          Depreciation Rate: <span class="text-purple-600">${depreciationRate.toFixed(1)}%</span>
+          <span class="text-sm text-gray-500 ml-2">(${depreciation.assets.length} deployed assets)</span>
+        </div>
       </div>
     `;
-    return;
-  }
-  
-  const depreciationRate = depreciation.totalOriginal > 0 ? 
-    (depreciation.totalDepreciation / depreciation.totalOriginal * 100) : 0;
-  
-  container.innerHTML = `
-    <div class="grid md:grid-cols-3 gap-6">
-      <div class="text-center">
-        <div class="text-3xl font-bold text-blue-600">$${depreciation.totalOriginal.toLocaleString()}</div>
-        <div class="text-sm text-gray-500">Original Value</div>
-      </div>
-      <div class="text-center">
-        <div class="text-3xl font-bold text-purple-600">$${depreciation.totalDepreciation.toLocaleString()}</div>
-        <div class="text-sm text-gray-500">Total Depreciation</div>
-      </div>
-      <div class="text-center">
-        <div class="text-3xl font-bold text-green-600">$${depreciation.totalCurrent.toLocaleString()}</div>
-        <div class="text-sm text-gray-500">Current Value</div>
-      </div>
-    </div>
-    <div class="mt-4 text-center">
-      <div class="text-lg font-semibold">
-        Depreciation Rate: <span class="text-purple-600">${depreciationRate.toFixed(1)}%</span>
-        <span class="text-sm text-gray-500 ml-2">(${depreciation.assets.length} deployed assets)</span>
-      </div>
-    </div>
-  `;
-      // Show the container after content is added
-      container.classList.remove('opacity-0');
-      container.classList.add('opacity-100');
-      resolve();
-});
+    
+    setTimeout(() => resolve(), 200);
+  });
 }
+
 
 function renderAssetHealthMetrics(health) {
   return new Promise(resolve => {
-  const container = document.getElementById('asset-health');
-  if (!container) return resolve();
-  
-  const total = health.operational + health.faulty + health.maintenance + health.rma;
-  
-  container.innerHTML = `
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div class="text-center p-4 bg-green-50 rounded-lg">
-        <div class="text-2xl font-bold text-green-600">${health.operational}</div>
-        <div class="text-sm text-gray-600">Operational</div>
+    const container = document.getElementById('asset-health');
+    if (!container) {
+      resolve();
+      return;
+    }
+    
+    const total = health.operational + health.faulty + health.maintenance + health.rma;
+    
+    container.innerHTML = `
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="text-center p-4 bg-green-50 rounded-lg">
+          <div class="text-2xl font-bold text-green-600">${health.operational}</div>
+          <div class="text-sm text-gray-600">Operational</div>
+        </div>
+        <div class="text-center p-4 bg-red-50 rounded-lg">
+          <div class="text-2xl font-bold text-red-600">${health.faulty}</div>
+          <div class="text-sm text-gray-600">Faulty</div>
+        </div>
+        <div class="text-center p-4 bg-yellow-50 rounded-lg">
+          <div class="text-2xl font-bold text-yellow-600">${health.maintenance}</div>
+          <div class="text-sm text-gray-600">Maintenance</div>
+        </div>
+        <div class="text-center p-4 bg-purple-50 rounded-lg">
+          <div class="text-2xl font-bold text-purple-600">${health.rma}</div>
+          <div class="text-sm text-gray-600">RMA</div>
+        </div>
       </div>
-      <div class="text-center p-4 bg-red-50 rounded-lg">
-        <div class="text-2xl font-bold text-red-600">${health.faulty}</div>
-        <div class="text-sm text-gray-600">Faulty</div>
-      </div>
-      <div class="text-center p-4 bg-yellow-50 rounded-lg">
-        <div class="text-2xl font-bold text-yellow-600">${health.maintenance}</div>
-        <div class="text-sm text-gray-600">Maintenance</div>
-      </div>
-      <div class="text-center p-4 bg-purple-50 rounded-lg">
-        <div class="text-2xl font-bold text-purple-600">${health.rma}</div>
-        <div class="text-sm text-gray-600">RMA</div>
-      </div>
-    </div>
-  `;
-  resolve();
-});
+    `;
+    
+    setTimeout(() => resolve(), 200);
+  });
 }
 
 function renderGrowthTrajectory(growth) {
   return new Promise(resolve => {
-  const container = document.getElementById('growth-trajectory');
-  if (!container) return resolve();
-  
-  const trendIcon = growth.growthRate > 0 ? "📈" : growth.growthRate < 0 ? "📉" : "➡️";
-  const trendColor = growth.growthRate > 0 ? "text-green-600" : growth.growthRate < 0 ? "text-red-600" : "text-gray-600";
-  
-  container.innerHTML = `
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-      <div class="text-center">
-        <div class="text-4xl mb-2">${trendIcon}</div>
-        <div class="text-sm text-gray-500">Growth Trend</div>
-      </div>
-      <div class="text-center">
-        <div class="text-2xl font-bold ${trendColor}">
-          ${growth.growthRate > 0 ? '+' : ''}${growth.growthRate.toFixed(1)}%
+    const container = document.getElementById('growth-trajectory');
+    if (!container) {
+      resolve();
+      return;
+    }
+    
+    const trendIcon = growth.growthRate > 0 ? "📈" : growth.growthRate < 0 ? "📉" : "➡️";
+    const trendColor = growth.growthRate > 0 ? "text-green-600" : growth.growthRate < 0 ? "text-red-600" : "text-gray-600";
+    
+    container.innerHTML = `
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+        <div class="text-center">
+          <div class="text-4xl mb-2">${trendIcon}</div>
+          <div class="text-sm text-gray-500">Growth Trend</div>
         </div>
-        <div class="text-sm text-gray-500">vs. Last Month</div>
-      </div>
-      <div class="text-center">
-        <div class="text-lg font-semibold">${growth.deploymentsThisMonth}</div>
-        <div class="text-sm text-gray-500">This Month</div>
-      </div>
-      <div class="text-center">
-        <div class="text-lg font-semibold">${growth.deploymentsLastMonth}</div>
-        <div class="text-sm text-gray-500">Last Month</div>
-      </div>
-    </div>
-    ${growth.trend && growth.trend.length > 0 ? `
-    <div class="mt-4">
-      <div class="text-sm font-medium text-gray-600 mb-2">6-Month Trend:</div>
-      <div class="flex justify-between items-end h-16 bg-gray-50 rounded p-2">
-        ${growth.trend.map(month => `
-          <div class="flex flex-col items-center">
-            <div class="bg-purple-600 rounded-t" style="height: ${Math.max(4, (month.deployments / Math.max(...growth.trend.map(m => m.deployments), 1)) * 48)}px; width: 12px;"></div>
-            <div class="text-xs mt-1">${month.month}</div>
-            <div class="text-xs text-gray-500">${month.deployments}</div>
+        <div class="text-center">
+          <div class="text-2xl font-bold ${trendColor}">
+            ${growth.growthRate > 0 ? '+' : ''}${growth.growthRate.toFixed(1)}%
           </div>
-        `).join('')}
+          <div class="text-sm text-gray-500">vs. Last Month</div>
+        </div>
+        <div class="text-center">
+          <div class="text-lg font-semibold">${growth.deploymentsThisMonth}</div>
+          <div class="text-sm text-gray-500">This Month</div>
+        </div>
+        <div class="text-center">
+          <div class="text-lg font-semibold">${growth.deploymentsLastMonth}</div>
+          <div class="text-sm text-gray-500">Last Month</div>
+        </div>
       </div>
-    </div>
-    ` : ''}
-  `;
-  resolve();
-});
+      ${growth.trend && growth.trend.length > 0 ? `
+      <div class="mt-4">
+        <div class="text-sm font-medium text-gray-600 mb-2">6-Month Trend:</div>
+        <div class="flex justify-between items-end h-16 bg-gray-50 rounded p-2">
+          ${growth.trend.map(month => `
+            <div class="flex flex-col items-center">
+              <div class="bg-purple-600 rounded-t" style="height: ${Math.max(4, (month.deployments / Math.max(...growth.trend.map(m => m.deployments), 1)) * 48)}px; width: 12px;"></div>
+              <div class="text-xs mt-1">${month.month}</div>
+              <div class="text-xs text-gray-500">${month.deployments}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      ` : ''}
+    `;
+    
+    setTimeout(() => resolve(), 200);
+  });
 }
 
+
 function showErrorState() {
-  const container = document.getElementById('kpi-cards');
+  const container = document.getElementById('kpi-cards') || 
+                   document.getElementById('main-content-area') ||
+                   document.querySelector('main');
   if (container) {
     container.innerHTML = `
-      <div class="col-span-full text-center py-8">
-        <div class="text-red-500 text-lg">Error loading dashboard data</div>
-        <button onclick="window.location.reload()" class="mt-4 bg-purple-600 text-white px-4 py-2 rounded">
-          Retry
-        </button>
+      <div class="flex items-center justify-center min-h-[60vh]">
+        <div class="text-center max-w-md mx-auto p-8">
+          <div class="w-16 h-16 mx-auto mb-4 text-red-400">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="w-full h-full">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+          </div>
+          <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">Dashboard Error</h2>
+          <p class="text-gray-500 dark:text-gray-400 mb-4">Unable to load dashboard data. Please try again.</p>
+          <div class="flex flex-col sm:flex-row gap-3 justify-center">
+            <button onclick="window.location.reload()" 
+                    class="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition font-medium">
+              Retry
+            </button>
+            <button onclick="window.location.href='/inventory.html'" 
+                    class="px-6 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition font-medium">
+              Go to Inventory
+            </button>
+          </div>
+        </div>
       </div>
     `;
   }

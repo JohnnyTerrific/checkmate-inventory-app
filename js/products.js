@@ -1,7 +1,9 @@
 // products.js
-import { showToast } from '../js/core.js';
+import { showToast, checkPageAccess, renderAccessDenied } from './core.js';
 import { loadSettings } from './settings.js';
-import { db } from './utils/firebase.js'; // <-- Use the shared db instance!
+import { db } from './utils/firebase.js';
+import { getCurrentUserRole } from './utils/users.js';
+import { can } from './utils/permissions.js';
 import {
   doc,
   getDoc,
@@ -15,6 +17,47 @@ import {
   query,
   orderBy
 } from "firebase/firestore";
+
+function escapeHtml(str) {
+  if (str == null || str === undefined) return '';
+  return String(str).replace(/[<>&"']/g, function(match) {
+    const escape = {
+      '<': '&lt;',
+      '>': '&gt;',
+      '&': '&amp;',
+      '"': '&quot;',
+      "'": '&#39;'
+    };
+    return escape[match];
+  });
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  if (document.body.dataset.page === "products") {
+    try {
+      console.log('Initializing products page...');
+      await initProducts();
+      
+      // FIXED: Use a more reliable method to ensure rendering is complete
+      await new Promise(resolve => {
+        if (document.readyState === 'complete') {
+          setTimeout(resolve, 100); // Small delay to ensure all rendering is done
+        } else {
+          window.addEventListener('load', () => {
+            setTimeout(resolve, 100);
+          });
+        }
+      });
+      
+      document.body.style.visibility = 'visible';
+      
+    } catch (error) {
+      console.error('Failed to initialize products page:', error);
+      showToast('Failed to load products page: ' + error.message, 'red');
+      document.body.style.visibility = 'visible'; // Show body even on error
+    }
+  }
+});
 
 
 export async function loadCategories() {
@@ -33,7 +76,7 @@ export async function saveCategories(categories) {
 }
 
 const PRODUCTS_SUBCOLLECTION_PATH = ["Products"];
-const PRODUCTS_PER_PAGE = 8;
+let PRODUCTS_PER_PAGE = 8;
 
 // Load all products from the products collection
 export async function loadProducts() {
@@ -48,11 +91,11 @@ export async function loadProducts() {
 
 // Add a new product
 export async function saveProduct(prod) {
-    await addDoc(
-      collection(db, ...PRODUCTS_SUBCOLLECTION_PATH),
-      prod
-    );
-  }
+  return await addDoc(
+    collection(db, ...PRODUCTS_SUBCOLLECTION_PATH),
+    prod
+  );
+}
 
 // Update an existing product
 export async function updateProduct(id, prod) {
@@ -60,6 +103,17 @@ export async function updateProduct(id, prod) {
       doc(db, ...PRODUCTS_SUBCOLLECTION_PATH, id),
       prod
     );
+  }
+
+  async function syncProductsWithDatabase() {
+    try {
+      products = await loadProducts();
+      renderProductsGridFromCache();
+      renderPagination();
+    } catch (error) {
+      console.error('Failed to sync with database:', error);
+      showToast('Failed to sync with database: ' + error.message, 'red');
+    }
   }
 
 // Delete a product
@@ -86,68 +140,175 @@ let products = [];
 let currentPage = 1;
 
 export async function initProducts() {
-  products = await loadProducts();
-  renderProductsGrid();
-  renderPagination();
-  document.getElementById("addProductBtn").onclick = () => showProductDialog().then(addProduct);
+  try {
+    console.log('Starting products initialization...');
+    
+    // Show loading state first
+    const grid = document.getElementById("productsGrid");
+    if (grid) {
+      grid.innerHTML = '<div class="col-span-full text-center py-8 text-gray-500">Loading products...</div>';
+    }
+
+    // Check permissions
+    const hasAccess = await checkPageAccess('productsCrud');
+    if (!hasAccess) {
+      console.log('Access denied to products page');
+      renderAccessDenied('section');
+      return;
+    }
+
+    console.log('Loading products data...');
+    products = await loadProducts(); // Load once here
+    console.log('Loaded products:', products.length);
+    
+    // Render from cache
+    renderProductsGridFromCache();
+    renderPagination();
+    
+    const addBtn = document.getElementById("addProductBtn");
+    if (addBtn) {
+      addBtn.onclick = () => showProductDialog().then(addProduct);
+    }
+
+    console.log('Products page initialized successfully');
+    
+  } catch (error) {
+    console.error('Failed to initialize products:', error);
+    showToast('Failed to load products: ' + error.message, 'red');
+    
+    // Show error in grid
+    const grid = document.getElementById("productsGrid");
+    if (grid) {
+      grid.innerHTML = `
+        <div class="col-span-full text-center py-8">
+          <div class="text-red-500 mb-2">Failed to load products</div>
+          <button onclick="window.location.reload()" class="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700">
+            Retry
+          </button>
+        </div>
+      `;
+    }
+  }
 }
 
-async function renderProductsGrid() {
-  products = await loadProducts();
-  products.sort((a, b) => a.order - b.order);
+async function renderProductsGridFromCache() {
   const grid = document.getElementById("productsGrid");
-  grid.innerHTML = "";
+  if (!grid) return;
 
+  // Use already loaded products instead of reloading
+  if (!products || products.length === 0) {
+    grid.innerHTML = '<div class="col-span-full text-center py-8 text-gray-500">No products found</div>';
+    return;
+  }
+
+  // FIXED: Sort products first
+  const sortedProducts = [...products].sort((a, b) => a.order - b.order);
+  
+  // FIXED: Set grid structure immediately to prevent layout shift
   grid.className = "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-start";
   
   const start = (currentPage - 1) * PRODUCTS_PER_PAGE;
-  const pageProducts = products.slice(start, start + PRODUCTS_PER_PAGE);
+  const pageProducts = sortedProducts.slice(start, start + PRODUCTS_PER_PAGE);
 
-  for (let i = 0; i < pageProducts.length; ++i) {
-    const p = pageProducts[i];
-    const card = document.createElement("div");
-    card.className = "relative bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 flex flex-col gap-2 cursor-grab group";
-    card.draggable = true;
-    card.setAttribute("data-index", start + i);
-
-    card.innerHTML = `
-      <div class="absolute bottom-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition">
-        <button title="Edit" class="edit-btn text-blue-600"><svg width="20" height="20"><path d="M4 13.5V16h2.5l7.3-7.3-2.5-2.5L4 13.5zM17.7 6.3c.4-.4.4-1 0-1.4l-2.6-2.6a1 1 0 0 0-1.4 0l-1.8 1.8 4 4 1.8-1.8z" fill="currentColor"/></svg></button>
-        <button title="Delete" class="delete-btn text-red-600"><svg width="20" height="20"><path d="M6 19c0 1.1.9 2 2 2h4c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" fill="currentColor"/></svg></button>
-        <span class="drag-handle cursor-grab text-gray-400" title="Drag">&#9776;</span>
+  // FIXED: Build all HTML in one go to prevent multiple reflows
+  const cardsHtml = pageProducts.map((p, i) => {
+    const cardIndex = start + i;
+    
+    // FIXED: Safe property access with defaults
+    const name = escapeHtml(p.name || '');
+    const vendor = escapeHtml(p.vendor || '');
+    const hsCode = escapeHtml(p.hsCode || '');
+    const category = escapeHtml(p.category || '');
+    const customsLiability = escapeHtml(p.customsLiability || '');
+    const description = escapeHtml(p.description || '');
+    const price = isNaN(parseFloat(p.price)) ? "-" : parseFloat(p.price).toLocaleString(undefined, {style: "currency", currency: "USD"});
+    const dutyRate = p.dutyRate || 0;
+    const depreciationRate = p.depreciationRate || 0;
+    
+    return `
+      <div class="relative bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 flex flex-col gap-2 cursor-grab group" 
+           draggable="true" 
+           data-index="${cardIndex}">
+        <div class="absolute bottom-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition">
+          <button title="Edit" class="edit-btn text-blue-600" data-index="${cardIndex}">
+            <svg width="20" height="20"><path d="M4 13.5V16h2.5l7.3-7.3-2.5-2.5L4 13.5zM17.7 6.3c.4-.4.4-1 0-1.4l-2.6-2.6a1 1 0 0 0-1.4 0l-1.8 1.8 4 4 1.8-1.8z" fill="currentColor"/></svg>
+          </button>
+          <button title="Delete" class="delete-btn text-red-600" data-index="${cardIndex}">
+            <svg width="20" height="20"><path d="M6 19c0 1.1.9 2 2 2h4c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" fill="currentColor"/></svg>
+          </button>
+          <span class="drag-handle cursor-grab text-gray-400" title="Drag">&#9776;</span>
+        </div>
+        <div><span class="font-bold">Model:</span> ${name}</div>
+        <div><span class="font-bold">Vendor:</span> ${vendor}</div>
+        <div><span class="font-bold">HS Code:</span> ${hsCode}</div>
+        <div><span class="font-bold">Category:</span> ${category}</div>
+        <div><span class="font-bold">Price:</span> ${price}</div>
+        <div><span class="font-bold">Duty Rate:</span> ${dutyRate}%</div>
+        <div><span class="font-bold">Customs Liability:</span> ${customsLiability}</div>
+        <div><span class="font-bold">Depreciation Rate:</span> ${depreciationRate}%</div>
+        <div><span class="font-bold">Description:</span> ${description}</div>
       </div>
-      <div><span class="font-bold">Model:</span> ${escapeHtml(p.name)}</div>
-      <div><span class="font-bold">Vendor:</span> ${escapeHtml(p.vendor)}</div>
-      <div><span class="font-bold">HS Code:</span> ${escapeHtml(p.hsCode)}</div>
-      <div><span class="font-bold">Category:</span> ${escapeHtml(p.category)}</div>
-      <div><span class="font-bold">Price:</span> ${
-  isNaN(parseFloat(p.price)) ? "-" : parseFloat(p.price).toLocaleString(undefined, {style: "currency", currency: "USD"})
-}</div>
-      <div><span class="font-bold">Duty Rate:</span> ${p.dutyRate}%</div>
-      <div><span class="font-bold">Customs Liability:</span> ${escapeHtml(p.customsLiability)}</div>
-      <div><span class="font-bold">Depreciation Rate:</span> ${p.depreciationRate}%</div>
-      <div><span class="font-bold">Description:</span> ${escapeHtml(p.description)}</div>
     `;
+  }).join('');
 
-    card.querySelector(".edit-btn").onclick = () => showProductDialog(p, start + i).then(prod => editProduct(prod, start + i));
-    card.querySelector(".delete-btn").onclick = () => showConfirmProductDialog(p).then(ok => { if (ok) deleteProduct(p); });
+  // FIXED: Set all HTML at once to prevent flicker
+  grid.innerHTML = cardsHtml;
 
-    card.querySelector(".drag-handle").onmousedown = e => e.stopPropagation();
-    card.ondragstart = e => {
-      e.dataTransfer.setData("dragIndex", start + i);
-      card.classList.add("opacity-50");
-    };
-    card.ondragend = () => card.classList.remove("opacity-50");
-    card.ondragover = e => { e.preventDefault(); card.classList.add("ring-2", "ring-purple-400"); };
-    card.ondragleave = e => card.classList.remove("ring-2", "ring-purple-400");
-    card.ondrop = e => {
-      card.classList.remove("ring-2", "ring-purple-400");
-      const fromIdx = +e.dataTransfer.getData("dragIndex");
-      if (fromIdx !== start + i) reorderProductsByIndex(fromIdx, start + i);
-    };
+  // FIXED: Add event listeners after HTML is set, with error handling
+  try {
+    grid.querySelectorAll('.edit-btn').forEach(btn => {
+      const index = parseInt(btn.dataset.index);
+      const productIndex = index - start;
+      if (pageProducts[productIndex]) {
+        btn.onclick = () => showProductDialog(pageProducts[productIndex], index).then(prod => editProduct(prod, index));
+      }
+    });
 
-    grid.appendChild(card);
+    grid.querySelectorAll('.delete-btn').forEach(btn => {
+      const index = parseInt(btn.dataset.index);
+      const productIndex = index - start;
+      if (pageProducts[productIndex]) {
+        btn.onclick = () => showConfirmProductDialog(pageProducts[productIndex]).then(ok => { if (ok) deleteProduct(pageProducts[productIndex]); });
+      }
+    });
+
+    // FIXED: Add drag and drop listeners with error handling
+    grid.querySelectorAll('[draggable="true"]').forEach(card => {
+      const cardIndex = parseInt(card.dataset.index);
+      
+      const dragHandle = card.querySelector('.drag-handle');
+      if (dragHandle) {
+        dragHandle.onmousedown = e => e.stopPropagation();
+      }
+      
+      card.ondragstart = e => {
+        e.dataTransfer.setData("dragIndex", cardIndex);
+        card.classList.add("opacity-50");
+      };
+      
+      card.ondragend = () => card.classList.remove("opacity-50");
+      
+      card.ondragover = e => { 
+        e.preventDefault(); 
+        card.classList.add("ring-2", "ring-purple-400"); 
+      };
+      
+      card.ondragleave = () => card.classList.remove("ring-2", "ring-purple-400");
+      
+      card.ondrop = e => {
+        card.classList.remove("ring-2", "ring-purple-400");
+        const fromIdx = +e.dataTransfer.getData("dragIndex");
+        if (fromIdx !== cardIndex) reorderProductsByIndex(fromIdx, cardIndex);
+      };
+    });
+  } catch (error) {
+    console.error('Error setting up event listeners:', error);
   }
+}
+
+async function renderProductsGrid() {
+  // FIXED: Just call the cache version, don't reload from database
+  renderProductsGridFromCache();
 }
 
 function renderPagination() {
@@ -171,25 +332,26 @@ function renderPagination() {
     </div>
   `;
 
-  // Event bindings - exactly as before
+  // FIXED: Use cache version in pagination events
   pagination.querySelector('#productsPrevPageBtn').onclick = () => {
     if (currentPage > 1) {
       currentPage--;
-      renderProductsGrid();
+      renderProductsGridFromCache(); // FIXED: Use cache version
       renderPagination();
     }
   };
   pagination.querySelector('#productsNextPageBtn').onclick = () => {
     if (currentPage < totalPages) {
       currentPage++;
-      renderProductsGrid();
+      renderProductsGridFromCache(); // FIXED: Use cache version
       renderPagination();
     }
   };
   pagination.querySelector('#productsPageSizeSelect').onchange = (e) => {
-    window.PRODUCTS_PER_PAGE = parseInt(e.target.value, 10);
+    const newPageSize = parseInt(e.target.value, 10);
+    PRODUCTS_PER_PAGE = newPageSize;
     currentPage = 1;
-    renderProductsGrid();
+    renderProductsGridFromCache(); // FIXED: Use cache version
     renderPagination();
   };
 }
@@ -301,20 +463,24 @@ dialog.querySelector("#addCatBtn").onclick = async () => {
         // Field validation
         let valid = true;
       
-        function markInvalid(selector) {
-          dialog.querySelector(selector).classList.add('border-red-500');
+        function markInvalid(selector, message = "") {
+          const field = dialog.querySelector(selector);
+          field.classList.add('border-red-500');
+          if (message) {
+            dialog.querySelector("#formError").textContent = message;
+          }
           valid = false;
         }
       
-        if (!name) markInvalid("#name");
-        if (!vendor) markInvalid("#vendor");
-        if (!hsCode) markInvalid("#hsCode");
-        if (!category) markInvalid("#category");
-        if (!price || isNaN(price) || Number(price) <= 0) markInvalid("#price");
-        if (!dutyRate || isNaN(dutyRate) || Number(dutyRate) < 0) markInvalid("#dutyRate");
-        if (!customsLiability) markInvalid("#customsLiability");
-        if (depreciationRate === "" || isNaN(depreciationRate) || Number(depreciationRate) < 0) markInvalid("#depreciationRate");
-        if (!description) markInvalid("#description");
+        if (!name) markInvalid("#name", "Product name is required");
+        if (!vendor) markInvalid("#vendor", "Please select a vendor");
+        if (!hsCode) markInvalid("#hsCode", "HS Code is required");
+        if (!category) markInvalid("#category", "Please select a category");
+        if (!price || isNaN(price) || Number(price) <= 0) markInvalid("#price", "Valid price is required");
+        if (!dutyRate || isNaN(dutyRate) || Number(dutyRate) < 0) markInvalid("#dutyRate", "Valid duty rate is required");
+        if (!customsLiability) markInvalid("#customsLiability", "Please select customs liability");
+        if (depreciationRate === "" || isNaN(depreciationRate) || Number(depreciationRate) < 0) markInvalid("#depreciationRate", "Valid depreciation rate is required");
+        if (!description) markInvalid("#description", "Description is required");
       
         // Uniqueness check
         const duplicate = products.some((p, idx) => p.name.toLowerCase() === name.toLowerCase() && idx !== editIndex);
@@ -373,45 +539,98 @@ function showConfirmProductDialog(product) {
 
 async function addProduct(prod) {
   if (!prod) return;
-  products = await loadProducts();
+  
+  // Calculate order based on current products array
   prod.order = products.length > 0 ? Math.max(...products.map(p => p.order)) + 1 : 0;
+  
   // Remove id field if present (addDoc will generate it)
   if ('id' in prod) delete prod.id;
-  await saveProduct(prod);
+  
+  // Save to database and get the new document reference
+  const docRef = await saveProduct(prod);
+  
+  // FIXED: Add to local products array instead of reloading
+  const newProduct = { id: docRef.id, ...prod };
+  products.push(newProduct);
+  
   showToast("Product added", "green");
-  await renderProductsGrid();
+  
+  // Re-render from cache
+  renderProductsGridFromCache();
   renderPagination();
 }
 
 async function editProduct(prod, idx) {
   if (!prod) return;
+  
   await updateProduct(prod.id, prod);
+  
+  // FIXED: Update local products array instead of reloading
+  const productIndex = products.findIndex(p => p.id === prod.id);
+  if (productIndex !== -1) {
+    products[productIndex] = { ...products[productIndex], ...prod };
+  }
+  
   showToast("Product updated", "blue");
-  await renderProductsGrid();
+  
+  // Re-render from cache
+  renderProductsGridFromCache();
 }
 
 async function deleteProduct(prod) {
   await deleteProductById(prod.id);
+  
+  // FIXED: Remove from local products array instead of reloading
+  products = products.filter(p => p.id !== prod.id);
+  
+  // Adjust currentPage if necessary
+  const totalPages = Math.ceil(products.length / PRODUCTS_PER_PAGE) || 1;
+  if (currentPage > totalPages) {
+    currentPage = totalPages;
+  }
+  
   showToast("Product deleted", "red");
-  await renderProductsGrid();
+  
+  // Re-render from cache
+  renderProductsGridFromCache();
   renderPagination();
 }
 
 async function reorderProductsByIndex(fromIdx, toIdx) {
-  products = await loadProducts();
-  products.sort((a, b) => a.order - b.order);
-  const [moved] = products.splice(fromIdx, 1);
-  products.splice(toIdx, 0, moved);
+  try {
+    // Use current products array
+    const reorderedProducts = [...products];
+    reorderedProducts.sort((a, b) => a.order - b.order);
+    const [moved] = reorderedProducts.splice(fromIdx, 1);
+    reorderedProducts.splice(toIdx, 0, moved);
 
-  const batch = writeBatch(db);
-  products.forEach((p, i) => {
-    batch.update(doc(db, "Products", p.id), { order: i });
-  });
-  await batch.commit();
+    // Update database with new order
+    const batch = writeBatch(db);
+    reorderedProducts.forEach((p, i) => {
+      batch.update(doc(db, ...PRODUCTS_SUBCOLLECTION_PATH, p.id), { order: i });
+    });
+    await batch.commit();
 
-  await renderProductsGrid();
-  renderPagination();
+    // FIXED: Update local products array only
+    products = reorderedProducts.map((p, i) => ({ ...p, order: i }));
+    renderProductsGridFromCache();
+    renderPagination();
+    showToast("Product order updated", "green");
+  } catch (error) {
+    console.error('Reorder failed:', error);
+    showToast('Failed to reorder products: ' + error.message, 'red');
+    // FIXED: Only reload from database on error
+    await syncProductsWithDatabase();
+  }
 }
+
+// FIXED: Add error handling with fallback to database sync
+window.addEventListener('error', (event) => {
+  if (event.error && event.error.message.includes('products')) {
+    console.warn('Product-related error detected, syncing with database...');
+    syncProductsWithDatabase();
+  }
+});
 
 function showAddCategoryDialog(existingCategories = []) {
   return new Promise(resolve => {
@@ -433,6 +652,12 @@ function showAddCategoryDialog(existingCategories = []) {
     const input = dialog.querySelector("#catNameInput");
     const errorDiv = dialog.querySelector("#catFormError");
 
+    // Clear previous error on input
+    input.addEventListener('input', () => {
+      input.classList.remove('border-red-500');
+      errorDiv.textContent = '';
+    });
+
     dialog.querySelector('button[value="cancel"]').onclick = e => {
       e.preventDefault();
       dialog.close();
@@ -442,12 +667,17 @@ function showAddCategoryDialog(existingCategories = []) {
     form.onsubmit = e => {
       e.preventDefault();
       const value = input.value.trim();
+      
+      // Reset error state
+      input.classList.remove('border-red-500');
+      errorDiv.textContent = '';
+      
       if (!value) {
         errorDiv.textContent = "Category name is required.";
         input.classList.add("border-red-500");
         return;
       }
-      if (existingCategories.includes(value)) {
+      if (existingCategories.map(c => c.toLowerCase()).includes(value.toLowerCase())) {
         errorDiv.textContent = "Category already exists.";
         input.classList.add("border-red-500");
         return;
@@ -456,14 +686,6 @@ function showAddCategoryDialog(existingCategories = []) {
       resolve(value);
     };
   });
-}
-
-// --- Utility ---
-
-function escapeHtml(str) {
-  return ("" + str).replace(/[<>&"']/g, s => ({
-    "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&#39;"
-  })[s]);
 }
 
 // --- For Settings.js: Prevent vendor deletion if in use ---

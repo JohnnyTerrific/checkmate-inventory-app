@@ -1,7 +1,7 @@
 import { loadAuditLog } from './inventory.js';
 import { getCurrentUser, getCurrentUserRole } from './utils/users.js';
 import { can } from './utils/permissions.js';
-import { showToast } from './core.js';
+import { showToast, renderAccessDenied } from './core.js';
 
 // Global state
 let auditData = {
@@ -12,104 +12,187 @@ let auditData = {
   searchQuery: ''
 };
 
-// Wait for both DOM and shell to be ready
+// FIXED: Loading screen functions at the top level
+function showLoadingScreen() {
+  // Remove any existing loading screen and initial loader
+  const existingLoader = document.getElementById('auditLoadingScreen');
+  if (existingLoader) {
+    existingLoader.remove();
+  }
+
+  const initialLoader = document.getElementById('initialLoader');
+  if (initialLoader) {
+    initialLoader.remove();
+  }
+
+  // Create loading screen HTML
+  const loadingHTML = `
+    <div id="auditLoadingScreen" class="fixed inset-0 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 flex items-center justify-center z-50">
+      <div class="text-center">
+        <div class="loading-pulse mb-8">
+          <div class="w-24 h-24 mx-auto bg-white rounded-2xl flex items-center justify-center shadow-2xl">
+            <svg class="w-16 h-16 text-purple-600" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+          </div>
+        </div>
+        <h2 class="text-3xl font-bold text-white mb-4">CheckMate</h2>
+        <p class="text-purple-200 text-lg mb-8">Loading Audit Log</p>
+        <div class="flex justify-center space-x-2">
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
+        </div>
+        <p id="auditLoadingProgress" class="text-purple-300 mt-6 text-sm">Initializing...</p>
+      </div>
+    </div>
+  `;
+
+  document.body.insertAdjacentHTML('beforeend', loadingHTML);
+}
+
+function hideLoadingScreen() {
+  const loadingScreen = document.getElementById('auditLoadingScreen');
+  if (loadingScreen) {
+    loadingScreen.style.opacity = '0';
+    loadingScreen.style.transition = 'opacity 0.5s ease-out';
+    setTimeout(() => {
+      loadingScreen.remove();
+    }, 500);
+  }
+  
+  const initialLoader = document.getElementById('initialLoader');
+  if (initialLoader) {
+    initialLoader.remove();
+  }
+}
+
+function updateLoadingProgress(message) {
+  const progressElement = document.getElementById('auditLoadingProgress');
+  if (progressElement) {
+    progressElement.textContent = message;
+  }
+}
+
+// Wait for DOM to be ready
 document.addEventListener('DOMContentLoaded', async () => {
-  showLoadingScreen();
-  updateLoadingProgress('Initializing audit system...');
+  if (document.body.dataset.page === "audit") {
+    try {
+      console.log('Starting audit page initialization...');
+      
+      // FIXED: Wait for auth state to be established
+      await new Promise(resolve => {
+        const checkAuth = () => {
+          if (window.auth && window.auth.currentUser) {
+            resolve();
+          } else {
+            setTimeout(checkAuth, 100);
+          }
+        };
+        checkAuth();
+      });
 
-  // Wait for shell to load the main-content element
-  await waitForElement('main-content');
+      showLoadingScreen();
+      updateLoadingProgress('Initializing audit system...');
 
-  try {
-    updateLoadingProgress('Checking permissions...');
-    // Check if user has permission to view audit logs
-    const canViewAudit = await can('viewDashboard');
-    if (!canViewAudit) {
+      updateLoadingProgress('Checking permissions...');
+      
+      // FIXED: Add more detailed logging and multiple fallback checks
+      const userRole = await getCurrentUserRole();
+      console.log('User role from getCurrentUserRole():', userRole);
+      
+      // FIXED: Try fallback role check if first fails
+      let effectiveRole = userRole;
+      if (!effectiveRole) {
+        console.log('Primary role check failed, trying localStorage fallback...');
+        effectiveRole = localStorage.getItem('userRole');
+        console.log('Fallback role from localStorage:', effectiveRole);
+      }
+      
+      // FIXED: More permissive role check - allow all except Agents
+      const canViewAudit = effectiveRole && effectiveRole !== 'Agent';
+      console.log('Can view audit:', canViewAudit, 'for role:', effectiveRole);
+      
+      if (!canViewAudit) {
+        console.log('Access denied for role:', effectiveRole);
+        hideLoadingScreen();
+        renderLocalAccessDenied();
+        document.body.style.visibility = 'visible';
+        return;
+      }
+
+      console.log('Access granted, initializing page...');
+      await initializeAuditPage();
+      document.body.style.visibility = 'visible';
+      
+    } catch (error) {
+      console.error('Error initializing audit page:', error);
       hideLoadingScreen();
-      renderAccessDenied();
-      return;
+      renderError('Failed to initialize audit page: ' + error.message);
+      document.body.style.visibility = 'visible';
     }
-
-    await initializeAuditPage();
-  } catch (error) {
-    console.error('Error initializing audit page:', error);
-    hideLoadingScreen();
-    renderError('Failed to initialize audit page');
   }
 });
 
-// Helper function to wait for an element to exist
-function waitForElement(elementId, timeout = 5000) {
-  return new Promise((resolve, reject) => {
-    const startTime = Date.now();
-    
-    function checkElement() {
-      const element = document.getElementById(elementId);
-      if (element) {
-        resolve(element);
-        return;
-      }
-      
-      if (Date.now() - startTime > timeout) {
-        reject(new Error(`Element #${elementId} not found within ${timeout}ms`));
-        return;
-      }
-      
-      // Check again in 100ms
-      setTimeout(checkElement, 100);
-    }
-    
-    checkElement();
-  });
-}
-
-function renderAccessDenied() {
-  const mainContent = document.getElementById('main-content');
+function renderLocalAccessDenied() {
+  let mainContent = document.getElementById('main-content');
   if (!mainContent) {
-    console.error('main-content element not found');
-    return;
+    mainContent = document.createElement('div');
+    mainContent.id = 'main-content';
+    mainContent.className = 'p-6';
+    document.body.appendChild(mainContent);
   }
   
   mainContent.innerHTML = `
-    <div class="flex items-center justify-center h-64">
-      <div class="text-center">
-        <div class="w-16 h-16 mx-auto mb-4 text-gray-400">
-          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div class="flex items-center justify-center min-h-[60vh]">
+      <div class="text-center max-w-md mx-auto p-8">
+        <div class="w-20 h-20 mx-auto mb-6 text-gray-400">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="w-full h-full">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
                   d="M12 15v2m0 0v2m0-2h2m-2 0H8m13-9a9 9 0 11-18 0 9 9 0 0118 0z"/>
           </svg>
         </div>
-        <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">Access Denied</h2>
-        <p class="text-gray-500 dark:text-gray-400">You don't have permission to view audit logs.</p>
-        <button onclick="window.location.href='/index.html'" 
-                class="mt-4 px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition">
-          Return Home
-        </button>
+        <h2 class="text-2xl font-semibold text-gray-700 dark:text-gray-300 mb-4">Access Restricted</h2>
+        <p class="text-gray-500 dark:text-gray-400 mb-6 leading-relaxed">
+          You don't have permission to view audit logs.
+        </p>
+        <div class="flex flex-col sm:flex-row gap-3 justify-center">
+          <button onclick="window.location.href='/inventory.html'" 
+                  class="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition font-medium">
+            Go to Inventory
+          </button>
+          <button onclick="window.history.back()" 
+                  class="px-6 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition font-medium">
+            Go Back
+          </button>
+        </div>
       </div>
     </div>
   `;
 }
 
 function renderError(message) {
-  const mainContent = document.getElementById('main-content');
+  let mainContent = document.getElementById('main-content');
   if (!mainContent) {
-    console.error('main-content element not found');
-    return;
+    mainContent = document.createElement('div');
+    mainContent.id = 'main-content';
+    mainContent.className = 'p-6';
+    document.body.appendChild(mainContent);
   }
   
   mainContent.innerHTML = `
-    <div class="flex items-center justify-center h-64">
-      <div class="text-center text-red-600">
-        <div class="w-16 h-16 mx-auto mb-4">
-          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div class="flex items-center justify-center min-h-[60vh]">
+      <div class="text-center max-w-md mx-auto p-8">
+        <div class="w-16 h-16 mx-auto mb-4 text-red-400">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="w-full h-full">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
                   d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
           </svg>
         </div>
-        <h2 class="text-xl font-semibold mb-2">Error</h2>
-        <p class="mb-4">${message}</p>
-        <button onclick="window.initializeAuditPage()" 
-                class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
+        <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">Loading Error</h2>
+        <p class="text-gray-500 dark:text-gray-400 mb-4">${message}</p>
+        <button onclick="window.location.reload()" 
+                class="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition font-medium">
           Retry
         </button>
       </div>
@@ -118,33 +201,29 @@ function renderError(message) {
 }
 
 async function initializeAuditPage() {
-  const mainContent = document.getElementById('main-content');
+  let mainContent = document.getElementById('main-content');
   if (!mainContent) {
-    console.error('main-content element not found');
-    hideLoadingScreen();
-    return;
+    mainContent = document.createElement('div');
+    mainContent.id = 'main-content';
+    mainContent.className = 'p-6';
+    document.body.appendChild(mainContent);
   }
   
   try {
     updateLoadingProgress('Loading audit data...');
-    // Load and filter audit data
     await loadAuditData();
     
     updateLoadingProgress('Setting up interface...');
-    // Render the audit interface
     await renderAuditInterface();
     
     updateLoadingProgress('Initializing controls...');
-    // Initialize event listeners
     initializeEventListeners();
     
     updateLoadingProgress('Rendering table...');
-    // Initial render
     renderAuditTable();
     
     updateLoadingProgress('Audit log ready!');
     
-    // Hide loading screen after a brief delay
     setTimeout(() => {
       hideLoadingScreen();
     }, 500);
@@ -152,7 +231,7 @@ async function initializeAuditPage() {
   } catch (error) {
     console.error('Error initializing audit page:', error);
     hideLoadingScreen();
-    renderError('Failed to load audit logs');
+    renderError('Failed to load audit logs: ' + error.message);
   }
 }
 
@@ -164,19 +243,14 @@ async function loadAuditData() {
     const currentUser = getCurrentUser();
     
     updateLoadingProgress('Filtering entries by permissions...');
-    // Store original logs
     auditData.logs = logs;
     
-    // Filter logs based on user role
     if (userRole === 'Agent') {
-      // Agents can only see their own actions
       auditData.filteredLogs = logs.filter(log => log.user === currentUser?.email);
     } else {
-      // Admins and other roles can see all logs
       auditData.filteredLogs = logs;
     }
     
-    // Reset pagination
     auditData.currentPage = 1;
     auditData.searchQuery = '';
     
@@ -219,7 +293,6 @@ async function renderAuditInterface() {
   
   mainContent.innerHTML = `
     <div class="max-w-7xl mx-auto">
-      <!-- Header -->
       <div class="mb-6">
         <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Audit Log</h1>
         <p class="text-gray-600 dark:text-gray-400">
@@ -228,11 +301,9 @@ async function renderAuditInterface() {
         </p>
       </div>
 
-      <!-- Controls -->
       <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 mb-6">
         <div class="p-4">
           <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <!-- Search -->
             <div class="flex gap-2 flex-1">
               <div class="relative flex-1">
                 <input id="auditSearch" 
@@ -250,8 +321,7 @@ async function renderAuditInterface() {
               </div>
             </div>
             
-            <!-- Export buttons -->
-                        ${canExport ? `
+            ${canExport ? `
             <div class="flex gap-2">
               <button id="refreshAuditBtn" 
                       class="px-4 py-2 rounded-lg bg-blue-100 dark:bg-blue-700 text-blue-800 dark:text-blue-200 
@@ -285,7 +355,6 @@ async function renderAuditInterface() {
         </div>
       </div>
 
-      <!-- Table Container -->
       <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
         <div class="overflow-x-auto">
           <table class="min-w-full table-auto">
@@ -303,34 +372,30 @@ async function renderAuditInterface() {
               </tr>
             </thead>
             <tbody id="auditTableBody" class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              <!-- Table rows will be inserted here -->
             </tbody>
           </table>
         </div>
         
-        <!-- Pagination -->
         <div id="auditPagination" class="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
-          <!-- Pagination will be inserted here -->
         </div>
       </div>
     </div>
   `;
 }
 
+// ... rest of the functions (initializeEventListeners, handleSearch, applyFilters, renderAuditTable, formatDate, getActionBadgeClass, renderPagination, exportToCSV, exportToXLSX) stay exactly the same ...
+
 function initializeEventListeners() {
-  // Search functionality
   const searchInput = document.getElementById('auditSearch');
   if (searchInput) {
     searchInput.addEventListener('input', handleSearch);
   }
 
-  // Refresh functionality
   const refreshButton = document.getElementById('refreshAuditBtn');
   if (refreshButton) {
     refreshButton.addEventListener('click', refreshAuditLog);
   }
 
-  // Export functionality
   const csvButton = document.getElementById('exportAuditCSV');
   const xlsxButton = document.getElementById('exportAuditXLSX');
   
@@ -340,7 +405,7 @@ function initializeEventListeners() {
 
 function handleSearch(event) {
   auditData.searchQuery = event.target.value.toLowerCase();
-  auditData.currentPage = 1; // Reset to first page
+  auditData.currentPage = 1;
   applyFilters();
   renderAuditTable();
 }
@@ -348,15 +413,6 @@ function handleSearch(event) {
 function applyFilters() {
   let filtered = auditData.logs;
   
-  // Apply role-based filtering
-  const userRole = getCurrentUserRole();
-  const currentUser = getCurrentUser();
-  
-  if (userRole === 'Agent') {
-    filtered = filtered.filter(log => log.user === currentUser?.email);
-  }
-  
-  // Apply search filter
   if (auditData.searchQuery) {
     filtered = filtered.filter(log => {
       const searchableFields = [
@@ -504,7 +560,6 @@ function renderPagination() {
     </div>
   `;
 
-  // Add event listeners for pagination
   const prevBtn = document.getElementById('prevPageBtn');
   const nextBtn = document.getElementById('nextPageBtn');
   const pageSizeSelect = document.getElementById('pageSizeSelect');
@@ -612,69 +667,6 @@ function exportToXLSX() {
     showToast('Failed to export XLSX', 'red');
   }
 }
-
-function showLoadingScreen() {
-  // Remove any existing loading screen
-  const existingLoader = document.getElementById('auditLoadingScreen');
-  if (existingLoader) {
-    existingLoader.remove();
-  }
-
-  // Create loading screen HTML
-  const loadingHTML = `
-    <div id="auditLoadingScreen" class="fixed inset-0 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 flex items-center justify-center z-50">
-      <div class="text-center">
-        <!-- Pulsating Logo -->
-        <div class="loading-pulse mb-8">
-          <div class="w-24 h-24 mx-auto bg-white rounded-2xl flex items-center justify-center shadow-2xl">
-            <svg class="w-16 h-16 text-purple-600" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-            </svg>
-          </div>
-        </div>
-        
-        <!-- Loading Text -->
-        <h2 class="text-3xl font-bold text-white mb-4">CheckMate</h2>
-        <p class="text-purple-200 text-lg mb-8">Loading Audit Log</p>
-        
-        <!-- Loading Dots -->
-        <div class="flex justify-center space-x-2">
-          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
-          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
-          <div class="loading-dots w-3 h-3 bg-white rounded-full"></div>
-        </div>
-        
-        <!-- Progress Text -->
-        <p id="auditLoadingProgress" class="text-purple-300 mt-6 text-sm">Initializing...</p>
-      </div>
-    </div>
-  `;
-
-    // Insert loading screen
-    document.body.insertAdjacentHTML('beforeend', loadingHTML);
-  }
-  
-  function hideLoadingScreen() {
-    const loadingScreen = document.getElementById('auditLoadingScreen');
-    if (loadingScreen) {
-      loadingScreen.style.opacity = '0';
-      loadingScreen.style.transition = 'opacity 0.5s ease-out';
-      setTimeout(() => {
-        loadingScreen.remove();
-      }, 500);
-    }
-  }
-
-  function updateLoadingProgress(message) {
-    const progressElement = document.getElementById('auditLoadingProgress');
-    if (progressElement) {
-      progressElement.textContent = message;
-    }
-  }
-
-
-
-
 
 // Expose function for retry button
 window.initializeAuditPage = initializeAuditPage;

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>CheckMate Inventory Management</title>
+  <title>CheckMate Products Management</title>
   <link rel="shortcut icon" type="image/png" href="/img/logo-mini.png">
   <!-- Tailwind CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -13,46 +13,58 @@
   <link rel="stylesheet" href="/assets/css/style.css" />
   <style>
     body { visibility: hidden; }
+    /* FIXED: Prevent layout shift during loading */
+    #productsGrid {
+      min-height: 200px;
+    }
   </style>
 </head>
 <body data-page="products" class="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100">
     <section class="p-6">
+      <!-- FIXED: Add missing page title -->
       <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold">Products Management</h1>
         <button id="addProductBtn" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded transition">Add Product</button>
       </div>
-<!-- Products Grid -->
-<div class="products-scroll-area overflow-x-auto" style="max-height:70vh;">
-    <div id="productsGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"></div>
-  </div>
-  <div id="pagination" class="flex justify-center items-center gap-4 py-4 mt-2"></div>
+
+      <!-- Products Grid -->
+      <div class="products-scroll-area overflow-x-auto" style="max-height:70vh;">
+        <!-- FIXED: Set initial grid structure to prevent layout shift -->
+        <div id="productsGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-start">
+          <div class="col-span-full text-center py-8 text-gray-500">Loading products...</div>
+        </div>
+      </div>
+      <div id="pagination" class="flex justify-center items-center gap-4 py-4 mt-2"></div>
+      
       <!-- Dialogs -->
       <dialog id="productDialog" class="rounded-xl p-4"></dialog>
       <dialog id="confirmProductDialog" class="rounded-xl p-4"></dialog>
       <dialog id="addCategoryDialog" class="rounded-xl p-0"></dialog>
     </section>
 
-     <!-- 1) Firestore & Auth SDKs -->
- <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-app-compat.js"></script>
- <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-auth-compat.js"></script>
- <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore-compat.js"></script>
+    <!-- Firebase scripts -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore-compat.js"></script>
 
- <!-- 2) Initialize Firebase BEFORE any module -->
- <script>
-   const firebaseConfig = {
-  apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMiJl5Uo",
-  authDomain: "checkmate-enova.firebaseapp.com",
-  projectId: "checkmate-enova",
-  storageBucket: "checkmate-enova.firebasestorage.app",
-  messagingSenderId: "1036780232884",
-  appId: "1:1036780232884:web:689229ef07859db22e77e1"
-};
-   firebase.initializeApp(firebaseConfig);
-   window.db   = firebase.firestore();
-   window.auth = firebase.auth();
- </script>
+    <!-- Initialize Firebase -->
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMiJl5Uo",
+        authDomain: "checkmate-enova.firebaseapp.com",
+        projectId: "checkmate-enova",
+        storageBucket: "checkmate-enova.firebasestorage.app",
+        messagingSenderId: "1036780232884",
+        appId: "1:1036780232884:web:689229ef07859db22e77e1"
+      };
+      firebase.initializeApp(firebaseConfig);
+      window.db = firebase.firestore();
+      window.auth = firebase.auth();
+      console.log('Firebase initialized for products page');
+    </script>
 
- <!-- 3) Modules (after Firebase) -->
- <script type="module" src="/js/core.js"></script>
- <script type="module" src="/js/inventory.js"></script>
-  </body>
-  </html>
+    <!-- FIXED: Correct module imports -->
+    <script type="module" src="/js/core.js"></script>
+    <script type="module" src="/js/products.js"></script>
+</body>
+</html>

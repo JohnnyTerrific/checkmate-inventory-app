@@ -285,8 +285,28 @@
   </div>
 
   <script type="module">
-    import { login } from './js/utils/users.js';
+    import { login, getCurrentUserProfile } from './js/utils/users.js';
     import { getCurrentUser } from './js/utils/users.js';
+  
+    // Add loading check with user profile
+    (async function checkExistingSession() {
+      const currentUser = getCurrentUser();
+      if (currentUser) {
+        try {
+          const userProfile = await getCurrentUserProfile();
+          const userRole = userProfile?.role;
+          
+          if (userRole === 'Agent' || window.innerWidth < 640) {
+            window.location.href = '/inventory.html';
+          } else {
+            window.location.href = '/index.html';
+          }
+        } catch (error) {
+          console.warn('Could not get user profile, redirecting to inventory:', error);
+          window.location.href = '/inventory.html';
+        }
+      }
+    })();
 
     if (getCurrentUser()) {
       if (window.innerWidth < 640) {
@@ -314,6 +334,12 @@
     // Form submission
     document.getElementById('loginForm').onsubmit = async function(e) {
       e.preventDefault();
+
+      if (this.dataset.submitting === 'true') {
+      return;
+      }
+      this.dataset.submitting = 'true';
+
       const email = document.getElementById('loginEmail').value.trim();
       const password = document.getElementById('loginPassword')?.value;
       const errorDiv = document.getElementById('loginError');
@@ -342,31 +368,58 @@
       submitBtn.disabled = true;
 
       try {
-        await login(email, password);
-        localStorage.setItem('lastPage', window.innerWidth < 640 ? '/inventory.html' : '/index.html');
-        if (window.innerWidth < 640) {
-          window.location.href = '/inventory.html';
-        } else {
-          window.location.href = '/index.html';
-        }
-      } catch (err) {
-        console.error("Login error:", err);
-        
-        let errorMessage = 'Login failed. Please try again later.';
-        if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
-          errorMessage = 'Invalid email or password. Please check your credentials and try again.';
-        } else if (err.code === 'auth/invalid-email') {
-          errorMessage = 'Please enter a valid email address.';
-        } else if (err.code === 'auth/too-many-requests') {
-          errorMessage = 'Too many failed attempts. Please try again later.';
-        }
-        
-        showError(errorMessage);
-        
-        // Reset button
-        submitBtn.innerHTML = originalText;
-        submitBtn.disabled = false;
-      }
+  await login(email, password);
+  
+  // Get user role to determine redirect
+  const userProfile = await getCurrentUserProfile();
+  const userRole = userProfile?.role;
+  
+  // Store for mobile redirect logic
+  localStorage.setItem('userRole', userRole);
+  
+  // Determine redirect based on role and device
+  let redirectUrl;
+  if (userRole === 'Agent') {
+    // Agents always go to inventory regardless of device
+    redirectUrl = '/inventory.html';
+  } else if (window.innerWidth < 640) {
+    // Other roles on mobile go to inventory by default
+    redirectUrl = '/inventory.html';
+  } else {
+    // Other roles on desktop go to executive dashboard
+    redirectUrl = '/index.html';
+  }
+
+    // Use the determined redirect URL
+    window.location.href = redirectUrl;
+
+  } catch (err) {
+  console.error("Login error:", err);
+  
+  let errorMessage = 'Login failed. Please try again later.';
+  if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+    errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+  } else if (err.code === 'auth/invalid-email') {
+    errorMessage = 'Please enter a valid email address.';
+  } else if (err.code === 'auth/too-many-requests') {
+    errorMessage = 'Too many failed attempts. Please try again later.';
+  } else if (err.code === 'auth/user-disabled') {
+    errorMessage = 'This account has been disabled. Please contact support.';
+  } else if (err.code === 'auth/network-request-failed') {
+    errorMessage = 'Network error. Please check your connection and try again.';
+  }
+  
+  showError(errorMessage);
+  
+  // Reset button state
+  submitBtn.innerHTML = originalText;
+  submitBtn.disabled = false;
+  
+  // Clear form if too many attempts
+  if (err.code === 'auth/too-many-requests') {
+    document.getElementById('loginPassword').value = '';
+  }
+}
     };
 
     function showError(message) {

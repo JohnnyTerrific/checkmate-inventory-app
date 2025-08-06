@@ -1,9 +1,155 @@
-import { onUserAuthStateChanged, getCurrentUser, logout, addUser, loadUsers, getCurrentUserProfile } from './utils/users.js';
-import { can } from './utils/permissions.js'; // Assuming getPermissions is used by 'can'
+import { onUserAuthStateChanged, getCurrentUser, logout, addUser, loadUsers, getCurrentUserProfile, getCurrentUserRole } from './utils/users.js';
+import { can, shouldRedirectToInventory, clearRoleCache } from './utils/permissions.js';
 import { db } from './utils/firebase.js';
 import { doc, updateDoc, deleteDoc } from "firebase/firestore";
 import { shellHTML } from './pages/partials/shell.js'; // Adjust path as needed
 
+export function showToast(message, color, duration = 3500) {
+  const toast = document.getElementById("toast");
+  if (!toast) {
+    console.error('Toast element not found');
+    return;
+  }
+  
+  toast.innerHTML = message;
+  toast.className = `fixed top-6 right-6 z-50 min-w-[200px] max-w-xs bg-${color}-600 text-white font-semibold px-4 py-2 rounded shadow-lg opacity-100 pointer-events-auto transition-opacity duration-300`;
+  
+  setTimeout(() => {
+    toast.classList.remove("opacity-100", "pointer-events-auto");
+    toast.classList.add("opacity-0", "pointer-events-none");
+  }, duration);
+}
+
+export function showToastWithAction(message, color, actions = []) {
+  const toast = document.getElementById("toast");
+  if (!toast) {
+    console.error('Toast element not found');
+    return;
+  }
+  
+  // Create action buttons HTML
+  const actionButtons = actions.map((action, index) => 
+    `<button id="toastAction${index}" class="ml-2 px-2 py-1 text-xs bg-white bg-opacity-20 rounded hover:bg-opacity-30 transition">${action.text}</button>`
+  ).join('');
+  
+  toast.innerHTML = `
+    ${message}
+    ${actionButtons}
+  `;
+  
+  toast.className = `fixed top-6 right-6 z-50 min-w-[250px] max-w-sm bg-${color}-600 text-white font-semibold px-4 py-3 rounded shadow-lg opacity-100 pointer-events-auto transition-opacity duration-300`;
+  
+  // Attach action handlers
+  actions.forEach((action, index) => {
+    const button = document.getElementById(`toastAction${index}`);
+    if (button) {
+      button.onclick = () => {
+        if (typeof action.action === 'function') {
+          action.action();
+        }
+        hideToast();
+      };
+    }
+  });
+  
+  // Auto-hide after longer duration for action toasts
+  setTimeout(() => {
+    hideToast();
+  }, 8000);
+}
+
+function hideToast() {
+  const toast = document.getElementById("toast");
+  if (toast) {
+    toast.classList.remove("opacity-100", "pointer-events-auto");
+    toast.classList.add("opacity-0", "pointer-events-none");
+  }
+}
+
+// Also make it available globally for backward compatibility
+window.showToast = showToast;
+window.showToastWithAction = showToastWithAction;
+
+export async function checkPageAccess(permission) {
+  try {
+    // FIXED: Wait for user to be properly loaded
+    let userRole = await getCurrentUserRole();
+    
+    // FIXED: Add fallback role checking
+    if (!userRole) {
+      console.warn('No user role from getCurrentUserRole, checking localStorage...');
+      userRole = localStorage.getItem('userRole');
+      if (userRole) {
+        console.log('Using fallback role from localStorage:', userRole);
+      }
+    }
+    
+    console.log('checkPageAccess - userRole:', userRole, 'permission:', permission);
+    
+    // Special handling for Agents
+    if (userRole === 'Agent') {
+      const currentPage = document.body.dataset.page;
+      const allowedPages = ['inventory']; // FIXED: Remove 'audit' for Agents
+      
+      if (!allowedPages.includes(currentPage)) {
+        console.log(`Agent tried to access restricted page: ${currentPage}`);
+        return false;
+      }
+      
+      return currentPage === 'inventory';
+    }
+    
+    // FIXED: For audit page, check role directly instead of permission
+    const currentPage = document.body.dataset.page;
+    if (currentPage === 'audit') {
+      const auditAllowedRoles = ['SuperAdmin', 'CEO', 'COO'];
+      const hasAuditAccess = auditAllowedRoles.includes(userRole);
+      console.log(`Audit access check - role: ${userRole}, allowed: ${hasAuditAccess}`);
+      return hasAuditAccess;
+    }
+    
+    // For other roles, check specific permissions
+    const hasPermission = await can(permission);
+    console.log(`Permission check for ${permission}:`, hasPermission);
+    return hasPermission;
+  } catch (error) {
+    console.error('Permission check failed:', error);
+    return false;
+  }
+}
+
+// Add function to render access denied
+export function renderAccessDenied(containerSelector = '#main-content') {
+  const container = document.querySelector(containerSelector);
+  if (!container) return;
+  
+  container.innerHTML = `
+      <div class="flex items-center justify-center min-h-[60vh]">
+          <div class="text-center max-w-md mx-auto p-8">
+              <div class="w-20 h-20 mx-auto mb-6 text-gray-400">
+                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="w-full h-full">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                            d="M12 15v2m0 0v2m0-2h2m-2 0H8m13-9a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+              </div>
+              <h2 class="text-2xl font-semibold text-gray-700 dark:text-gray-300 mb-4">Access Restricted</h2>
+              <p class="text-gray-500 dark:text-gray-400 mb-6 leading-relaxed">
+                This page is not available for your account level. You have access to inventory management features.
+              </p>
+              <div class="flex flex-col sm:flex-row gap-3 justify-center">
+                <button onclick="window.location.href='/inventory.html'" 
+                        class="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition font-medium">
+                    Go to Inventory
+                </button>
+                <button onclick="window.history.back()" 
+                        class="px-6 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition font-medium">
+                    Go Back
+                </button>
+              </div>
+          </div>
+      </div>
+  `;
+}
 
 async function updateUserRoleInFirestore(uid, newRole) {
   const userDocRef = doc(db, "users", uid);
@@ -19,6 +165,12 @@ async function updateUserRoleInFirestore(uid, newRole) {
 
 async function showUserManagementModal() {
   console.log("Opening Manage Users dialog...");
+
+  if (!(await can('canAddUsers'))) {
+    showToast("You don't have permission to manage users.", "red");
+    return;
+  }
+
   let dialog = document.getElementById('userManagementDialog');
   if (!dialog) {
     dialog = document.createElement('dialog');
@@ -46,19 +198,18 @@ async function showUserManagementModal() {
             <td class="px-4 py-3">${u.role}</td>
             <td class="px-4 py-3 flex gap-2">
               ${u.role !== 'SuperAdmin' ? `
-                <button data-user="${u.username}" class="editUserBtn group" title="Edit">
+                <button data-user="${u.email}" class="editUserBtn group" title="Edit">
                   <svg class="w-5 h-5 text-blue-500 group-hover:text-blue-700" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536M9 13l6-6 3 3-6 6H9v-3z"/>
                   </svg>
                 </button>
-                <button data-user="${u.username}" class="pwUserBtn group" title="Show/Change Password">
+                <button data-user="${u.email}" class="pwUserBtn group" title="Show/Change Password">
                   <svg class="w-5 h-5 text-gray-500 group-hover:text-gray-700" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
                     <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
                   </svg>
                 </button>
-                <button data-user="${u.username}" class="deleteUserBtn group" title="Delete">
-                  <svg class="w-5 h-5 text-red-500 group-hover:text-red-700" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <button data-user="${u.email}" class="deleteUserBtn group" title="Delete">                  <svg class="w-5 h-5 text-red-500 group-hover:text-red-700" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
                   </svg>
                 </button>
@@ -70,7 +221,7 @@ async function showUserManagementModal() {
     </table>
     </div>
   <form id="addUserForm" class="flex flex-col md:flex-row gap-4 items-end mb-4 w-full">
-    <input id="addUsername" type="text" placeholder="Username" required class="border rounded px-4 py-3 bg-gray-50 dark:bg-gray-800 flex-1 w-full" />
+    <input id="addUsername" type="email" placeholder="Email" required class="border rounded px-4 py-3 bg-gray-50 dark:bg-gray-800 flex-1 w-full" />
     <div class="relative flex-1 min-w-[10rem] w-full">
       <input id="addPassword" type="password" placeholder="Password" required class="border rounded px-4 py-3 bg-gray-50 dark:bg-gray-800 pr-10 w-full" />
       <button type="button" id="toggleAddPw" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
@@ -121,12 +272,11 @@ if (toggleAddPw) {
   // Delete user
   dialog.querySelectorAll('.deleteUserBtn').forEach(btn => {
     btn.onclick = async function() {
-      const email = btn.dataset.user;
-      const user = users.find(u => u.email === email);
+      const email = btn.dataset.user;  
+      const user = users.find(u => u.email === email);  
       if (!user) return;
       if (confirm(`Delete user ${email}?`)) {
         // Remove from Firestore
-        const db = getFirestore();
         await deleteDoc(doc(db, "users", user.id));
         showUserManagementModal();
       }
@@ -146,8 +296,8 @@ if (toggleAddPw) {
 // Show/Change password
 dialog.querySelectorAll('.pwUserBtn').forEach(btn => {
   btn.onclick = function() {
-    const username = btn.dataset.user;
-    const user = users.find(u => u.username === username);
+    const email = btn.dataset.user;  // Fix: use email
+    const user = users.find(u => u.email === email);  // Fix: find by email
     if (!user) return;
     showChangePasswordModal(user);
   };
@@ -158,20 +308,53 @@ dialog.querySelectorAll('.pwUserBtn').forEach(btn => {
   };
 }
 
-function renderUIForRole(role) {
-  if (!can('settings')) {
-    const settingsTab = document.getElementById('settingsTab');
-    if (settingsTab) settingsTab.style.display = 'none';
+async function renderUIForRole(role) {
+  if (role === 'Agent') {
+    // FIXED: Hide navigation items that Agents shouldn't see (including audit)
+    const restrictedNavItems = ['home', 'dashboard', 'products', 'settings', 'audit'];
+    restrictedNavItems.forEach(page => {
+      const navItem = document.querySelector(`[data-page="${page}"]`);
+      if (navItem) {
+        navItem.style.display = 'none';
+      }
+    });
+    
+    // Hide global search and manage users for Agents
+    const globalSearchBtn = document.getElementById('globalSearchBtn');
+    const manageUsersBtn = document.getElementById('manageUsersBtn');
+    
+    if (globalSearchBtn) globalSearchBtn.style.display = 'none';
+    if (manageUsersBtn) manageUsersBtn.style.display = 'none';
+    
+    return;
   }
-  if (!can('viewDashboard')) {
-    const dashboardTab = document.getElementById('dashboardTab');
-    if (dashboardTab) dashboardTab.style.display = 'none';
+  
+  // For other roles, check specific permissions
+  if (!(await can('settings'))) {
+    const settingsNav = document.querySelector('[data-page="settings"]');
+    if (settingsNav) settingsNav.style.display = 'none';
   }
-  if (!can('viewIndex')) {
-    const indexTab = document.getElementById('indexTab');
-    if (indexTab) indexTab.style.display = 'none';
+  
+  if (!(await can('viewDashboard'))) {
+    const dashboardNav = document.querySelector('[data-page="dashboard"]');
+    if (dashboardNav) dashboardNav.style.display = 'none';
   }
-  // Add more controls as needed per your menu
+  
+  if (!(await can('viewIndex'))) {
+    const indexNav = document.querySelector('[data-page="home"]');
+    if (indexNav) indexNav.style.display = 'none';
+  }
+  
+  if (!(await can('productsCrud'))) {
+    const productsNav = document.querySelector('[data-page="products"]');
+    if (productsNav) productsNav.style.display = 'none';
+  }
+  
+  // FIXED: Hide audit nav for users without audit access
+  if (!(await can('viewAuditLog'))) {
+    const auditNav = document.querySelector('[data-page="audit"]');
+    if (auditNav) auditNav.style.display = 'none';
+  }
 }
 
 function showEditUserModal(user) {
@@ -180,8 +363,9 @@ function showEditUserModal(user) {
   dialog.innerHTML = `
     <h3 class="text-lg font-bold mb-4 text-purple-700">Edit User</h3>
     <form id="editUserForm" class="flex flex-col gap-3">
-      <input type="text" id="editUsername" value="${user.username}" class="border rounded px-2 py-1" required>
+      <input type="email" id="editUsername" value="${user.email}" class="border rounded px-2 py-1" required>
       <select id="editRole" class="border rounded px-2 py-1">
+        <option value="SuperAdmin" ${user.role === 'SuperAdmin' ? 'selected' : ''}>SuperAdmin</option>
         <option value="CEO" ${user.role === 'CEO' ? 'selected' : ''}>CEO</option>
         <option value="COO" ${user.role === 'COO' ? 'selected' : ''}>COO</option>
         <option value="Agent" ${user.role === 'Agent' ? 'selected' : ''}>Agent</option>
@@ -199,26 +383,21 @@ function showEditUserModal(user) {
 
   dialog.querySelector('#cancelEditUser').onclick = () => dialog.close();
 
-  dialog.querySelector('#editUserForm').onsubmit = function(e) {
+  dialog.querySelector('#editUserForm').onsubmit = async function(e) {
     e.preventDefault();
-    const newUsername = dialog.querySelector('#editUsername').value.trim();
+    const newEmail = dialog.querySelector('#editUsername').value.trim();
     const newRole = dialog.querySelector('#editRole').value;
-    if (!newUsername) {
-      dialog.querySelector('#editUserError').textContent = 'Username required';
+    if (!newEmail) {
+      dialog.querySelector('#editUserError').textContent = 'Email required';
       return;
     }
-    const users = loadUsers();
-    if (users.some(u => u.username === newUsername && u.username !== user.username)) {
-      dialog.querySelector('#editUserError').textContent = 'Username already exists';
-      return;
-    }
-    const idx = users.findIndex(u => u.username === user.username);
-    if (idx !== -1) {
-      users[idx].username = newUsername;
-      users[idx].role = newRole;
-      saveUsers(users);
+    
+    try {
+      // Update in Firestore
+      await updateUserRoleInFirestore(user.id, newRole);
       dialog.close();
-      showUserManagementModal();
+    } catch (error) {
+      dialog.querySelector('#editUserError').textContent = 'Error updating user: ' + error.message;
     }
   };
 }
@@ -254,69 +433,44 @@ function showChangePasswordModal(user) {
     pwInput.type = pwInput.type === 'password' ? 'text' : 'password';
   };
 
-  dialog.querySelector('#changePwForm').onsubmit = function(e) {
+  dialog.querySelector('#changePwForm').onsubmit = async function(e) {
     e.preventDefault();
     const newPw = pwInput.value;
     if (!newPw) {
       dialog.querySelector('#pwError').textContent = 'Password required';
       return;
     }
-    const users = loadUsers();
-    const idx = users.findIndex(u => u.username === user.username);
-    if (idx !== -1) {
-      users[idx].password = newPw;
-      saveUsers(users);
+    
+    try {
+      // Update password in Firestore (you'll need to implement this in users.js)
+      const userDocRef = doc(db, "users", user.id);
+      await updateDoc(userDocRef, { password: newPw });
+      showToast("Password updated successfully.", "green");
       dialog.close();
       showUserManagementModal();
+    } catch (error) {
+      dialog.querySelector('#pwError').textContent = 'Error updating password: ' + error.message;
     }
   };
 }
 
-function setupUserHeaderEvents() {
-  const userInfoDiv = document.getElementById('currentUserInfo');
-  const logoutBtn = document.getElementById('logoutBtn');
-  const manageUsersBtn = document.getElementById('manageUsersBtn');
-  const user = getCurrentUser();
-
-  if (user && userInfoDiv) {
-    userInfoDiv.textContent = `User: ${user.username} (${user.role})`;
-  }
-  if (user && logoutBtn) {
-    logoutBtn.onclick = function() {
-      console.log("Logout clicked");
-      logout();
-      window.location.replace("/login.html");
-    };
-  }
-  if (user && manageUsersBtn && user.role === 'SuperAdmin') {
-    manageUsersBtn.classList.remove('hidden');
-    manageUsersBtn.onclick = showUserManagementModal;
-  }
-}
-
 // Restrict Agents on Mobile to Inventory page only
-function restrictMobileAgentUI() {
-  const user = getCurrentUser();
-  if (user && user.role === 'Agent' && window.innerWidth <= 768) {
-    ['dashboardTab', 'indexTab', 'settingsTab'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.style.display = 'none';
-    });
-    // Optional: redirect if on other page
-    if (!document.body.dataset.page || document.body.dataset.page !== 'inventory') {
-      window.location.href = '/inventory.html';
+async function restrictMobileAgentUI() {
+  try {
+    const role = await getCurrentUserRole();
+    if (role === 'Agent' && window.innerWidth <= 768) {
+      ['dashboardTab', 'indexTab', 'settingsTab'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+      // Optional: redirect if on other page
+      if (!document.body.dataset.page || document.body.dataset.page !== 'inventory') {
+        window.location.href = '/inventory.html';
+      }
     }
+  } catch (error) {
+    console.error('Error in restrictMobileAgentUI:', error);
   }
-}
-
-function initApp() {
-  const user = getCurrentUser();
-  if (!user) {
-    window.location.replace("/login.html"); // <-- Make sure this is just "login.html"
-    return;
-  }
-  renderUIForRole(user.role);
-  restrictMobileAgentUI();
 }
 
 async function injectShell() {
@@ -486,50 +640,91 @@ function setupSidebarToggle() {
 document.addEventListener('DOMContentLoaded', () => {
   onUserAuthStateChanged(async (authUser) => {
     if (!authUser) {
-      if (!window.location.pathname.endsWith('/login.html')) {
-        window.location.replace("/login.html");
-      }
+      window.location.href = "/login.html";
       return;
     }
-    // Fetch Firestore user profile
+
+    console.log('Auth user detected:', authUser.email);
+    
     const userProfile = await getCurrentUserProfile();
     if (!userProfile) {
-      showToast("User profile not found.", "red");
-      await logout();
-      window.location.replace("/login.html");
+      console.error('No user profile found');
+      window.location.href = "/login.html";
       return;
     }
-  
-    await injectShell();
-    setupUserHeaderEvents(userProfile);
-  
-    // User info and logout
-    const userInfoDiv = document.getElementById('currentUserInfo');
-    const logoutBtn = document.getElementById('logoutBtn');
-    const manageUsersBtn = document.getElementById('manageUsersBtn');
-  
-    if (userInfoDiv && logoutBtn) {
-      userInfoDiv.textContent = `User: ${userProfile.username} (${userProfile.role})`;
-      logoutBtn.onclick = function() {
-        logout();
-        window.location.replace("/login.html");
-      };
-    }
-  
-    // Show Manage Users button only for SuperAdmin
-    if (manageUsersBtn) {
-      if (userProfile.role === 'SuperAdmin') {
-        manageUsersBtn.classList.remove('hidden');
-        manageUsersBtn.onclick = showUserManagementModal;
-      } else {
-        manageUsersBtn.classList.add('hidden');
-        manageUsersBtn.onclick = null;
+
+    console.log('User profile loaded:', userProfile);
+    
+    const currentPage = document.body.dataset.page;
+    const userRole = userProfile.role;
+    
+    // FIXED: Store role in localStorage for fallback
+    localStorage.setItem('userRole', userRole);
+    localStorage.setItem('lastUserRole', userRole);
+    console.log('Stored role in localStorage:', userRole);
+    
+    if (userRole === 'Agent') {
+      const allowedPages = ['inventory'];
+      if (!allowedPages.includes(currentPage)) {
+        console.log(`Redirecting Agent from ${currentPage} to inventory`);
+        window.location.href = '/inventory.html';
+        return;
       }
     }
-  
+
+    await injectShell();
+
+    // FIXED: Setup logout button properly with event listener
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        console.log('Logout button clicked');
+        try {
+          await logout();
+        } catch (error) {
+          console.error('Logout error:', error);
+          // Force redirect even if logout fails
+          window.location.replace('/login.html');
+        }
+      });
+    }
+
+    // Show Manage Users button only for SuperAdmin
+    const manageUsersBtn = document.getElementById('manageUsersBtn');
+    if (manageUsersBtn) {
+      const canManageUsers = await can('canAddUsers');
+      if (canManageUsers) {
+        manageUsersBtn.style.display = 'flex';
+        manageUsersBtn.addEventListener('click', () => showUserManagementModal());
+      } else {
+        manageUsersBtn.style.display = 'none';
+      }
+    }
+    
+    if (logoutBtn) {
+      logoutBtn.onclick = async () => {
+        console.log('Logout button clicked');
+        await logout();
+      };
+    }
+
+    // Show Manage Users button only for SuperAdmin
+    if (manageUsersBtn) {
+      const canManageUsers = await can('canAddUsers');
+      if (canManageUsers) {
+        manageUsersBtn.style.display = 'flex';
+        manageUsersBtn.onclick = () => showUserManagementModal();
+      } else {
+        manageUsersBtn.style.display = 'none';
+      }
+    }
+
     setupDarkModeToggle();
     highlightActiveNav();
     setupSidebarToggle();
+    await restrictMobileAgentUI();
+    await renderUIForRole(userProfile.role);
 
 
   document.querySelectorAll('.nav-link').forEach(link => {
@@ -707,29 +902,49 @@ window.performGlobalSearch = function(query) {
 
   // Build results display
   resultsDiv.innerHTML = `
-  <div>
-    <div class="font-bold text-purple-700 dark:text-purple-300 mt-2">Inventory (${inventoryMatches.length})</div>
-    ${inventoryMatches.length ? inventoryMatches.map(i => `
-      <div class="border-b border-gray-200 dark:border-gray-700 py-1 flex flex-col gap-1">
-        <div><b>ID:</b> ${i.chargerId}</div>
-        <div><b>Serial:</b> ${i.chargerSerial || '-'}</div>
-        <div><b>SIM:</b> ${i.simNumber || '-'}</div>
-        <div><b>Product:</b> ${i.product || i.model || '-'}</div>
-        <div><b>Status:</b> ${i.status || '-'}</div>
-        <div><b>Location:</b> ${i.location || '-'}</div>
-        <div class="flex gap-2 mt-1">
-  <button type="button" class="move-btn px-2 py-1 text-xs rounded bg-blue-600 text-white"
-    data-chargerid="${i.chargerId}" data-serial="${i.chargerSerial || ''}">Move</button>
-  <button type="button" class="edit-inventory-btn px-2 py-1 text-xs rounded bg-green-600 text-white"
-    data-chargerid="${i.chargerId}" data-serial="${i.chargerSerial}">Edit</button>
-  <button type="button" class="view-inventory-btn px-2 py-1 text-xs rounded bg-purple-600 text-white"
-    data-chargerid="${i.chargerId}">View</button>
-</div>
-      </div>
-    `).join('') : '<div class="text-gray-400 text-sm">None</div>'}
-  </div>
-`;
-// Add action listeners
+    <div>
+      <!-- Inventory Section -->
+      <div class="font-bold text-purple-700 dark:text-purple-300 mt-2">Inventory (${inventoryMatches.length})</div>
+      ${inventoryMatches.length ? inventoryMatches.map(i => `
+        <div class="border-b border-gray-200 dark:border-gray-700 py-1 flex flex-col gap-1">
+          <div><b>ID:</b> ${i.chargerId}</div>
+          <div><b>Serial:</b> ${i.chargerSerial || '-'}</div>
+          <div><b>SIM:</b> ${i.simNumber || '-'}</div>
+          <div><b>Product:</b> ${i.product || i.model || '-'}</div>
+          <div><b>Status:</b> ${i.status || '-'}</div>
+          <div><b>Location:</b> ${i.location || '-'}</div>
+          <div class="flex gap-2 mt-1">
+            <button type="button" class="move-btn px-2 py-1 text-xs rounded bg-blue-600 text-white"
+              data-chargerid="${i.chargerId}" data-serial="${i.chargerSerial || ''}">Move</button>
+            <button type="button" class="edit-inventory-btn px-2 py-1 text-xs rounded bg-green-600 text-white"
+              data-chargerid="${i.chargerId}" data-serial="${i.chargerSerial || ''}">Edit</button>
+            <button type="button" class="view-inventory-btn px-2 py-1 text-xs rounded bg-purple-600 text-white"
+              data-chargerid="${i.chargerId}">View</button>
+          </div>
+        </div>
+      `).join('') : '<div class="text-gray-400 text-sm">None</div>'}
+      
+      <!-- Shipments Section -->
+      <div class="font-bold text-purple-700 dark:text-purple-300 mt-4">Shipments (${shipmentMatches.length})</div>
+      ${shipmentMatches.length ? shipmentMatches.map(s => `
+        <div class="border-b border-gray-200 dark:border-gray-700 py-1">
+          <div><b>ID:</b> ${s.shipmentId || '-'}</div>
+          <div><b>Vendor:</b> ${s.vendor || '-'}</div>
+          <div><b>ETA:</b> ${new Date(s.eta).toLocaleDateString()}</div>
+        </div>
+      `).join('') : '<div class="text-gray-400 text-sm">None</div>'}
+      
+      <!-- Products Section -->
+      <div class="font-bold text-purple-700 dark:text-purple-300 mt-4">Products (${productMatches.length})</div>
+      ${productMatches.length ? productMatches.map(p => `
+        <div class="border-b border-gray-200 dark:border-gray-700 py-1">
+          <div><b>Name:</b> ${p.name || '-'}</div>
+          <div><b>HS Code:</b> ${p.hsCode || '-'}</div>
+          <div><b>Vendor:</b> ${p.vendor || '-'}</div>
+        </div>
+      `).join('') : '<div class="text-gray-400 text-sm">None</div>'}
+    </div>
+  `;
 // For MOVE button:
 resultsDiv.querySelectorAll('.move-btn').forEach(btn => {
   btn.onclick = function() {
@@ -835,28 +1050,8 @@ if (shipmentBtn) {
 
 
 
-  document.body.style.visibility = 'visible';
 });
 });
-
-export function showToast(message, color = "green") {
-  let toast = document.getElementById("toast");
-  if (!toast) {
-    toast = document.createElement("div");
-    toast.id = "toast";
-    document.body.appendChild(toast);
-  }
-  toast.textContent = message;
-  toast.className = `fixed bottom-6 right-6 z-50 min-w-[200px] max-w-xs bg-${color}-600 text-white font-semibold px-4 py-2 rounded shadow-lg opacity-100 pointer-events-auto transition-opacity duration-300`;
-  toast.style.display = "block";
-  setTimeout(() => {
-    toast.classList.remove("opacity-100", "pointer-events-auto");
-    toast.classList.add("opacity-0", "pointer-events-none");
-    toast.style.display = "none";
-  }, 2000);
-}
-
-window.showToast = showToast;
 
 window.showLegend = function(text, e) {
   const legend = document.getElementById('hoverLegend');

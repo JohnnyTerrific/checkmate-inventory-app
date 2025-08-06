@@ -1,16 +1,26 @@
 // --- Data service abstraction ---
-import { showToast } from '../js/core.js';
-import { db } from './utils/firebase.js'; // <-- Use your shared db instance!
+import { showToast } from './core.js'; // FIXED: Remove ../js/
+import { db } from './utils/firebase.js';
 import { doc, getDoc, setDoc } from "firebase/firestore";
+import { checkPageAccess, renderAccessDenied } from './core.js';
+import { getCurrentUserRole } from './utils/users.js';
+import { can } from './utils/permissions.js';
+import { loadProducts } from './products.js';
+import { loadInventory } from './inventory.js';
 
-export const firebaseConfig = {
-  apiKey: "AIzaSyCdNoC5xt3zkMpB5YNmx2spRsiBMiJl5Uo",
-  authDomain: "checkmate-enova.firebaseapp.com",
-  projectId: "checkmate-enova",
-  storageBucket: "checkmate-enova.firebasestorage.app",
-  messagingSenderId: "1036780232884",
-  appId: "1:1036780232884:web:689229ef07859db22e77e1"
-};
+document.addEventListener('DOMContentLoaded', async () => {
+  if (document.body.dataset.page === "settings") {
+    try {
+      console.log('Initializing settings page...');
+      await initSettings();
+      document.body.style.visibility = 'visible'; // FIXED: Show body after initialization
+    } catch (error) {
+      console.error('Failed to initialize settings page:', error);
+      showToast('Failed to load settings page: ' + error.message, 'red');
+      document.body.style.visibility = 'visible'; // Show body even on error
+    }
+  }
+});
 
 const SETTINGS_KEY = "settings"; // Firestore doc id
 
@@ -26,13 +36,22 @@ export const allowedStatusesByParent = {
 export function getAllowedStatusesForLocation(locationName, settings) {
   // Find the location in settings
   const location = settings.locations.find(loc => loc.name === locationName);
-  if (!location) return settings.statuses; // If location not found, allow all statuses
+  if (!location) {
+    console.warn(`Location "${locationName}" not found in settings`);
+    return settings.statuses; // If location not found, allow all statuses
+  }
   
   // Get the parent container
   const parentId = location.parent;
   
-  // Return statuses allowed for this parent type
-  return allowedStatusesByParent[parentId] || settings.statuses;
+  // Return statuses allowed for this parent type, with fallback
+  const allowedStatuses = allowedStatusesByParent[parentId];
+  if (!allowedStatuses) {
+    console.warn(`No status rules defined for parent "${parentId}"`);
+    return settings.statuses;
+  }
+  
+  return allowedStatuses;
 }
 
 export async function loadSettings() {
@@ -114,81 +133,114 @@ export function getParentContainerById(parentId, settings) {
   return settings.parentContainers.find(p => p.id === parentId);
 }
 
-export async function getDashboardStats(inventory, shipments) {
-  // Load settings first
+export async function getDashboardStats(inventory, shipments = []) {
+  if (!inventory || !Array.isArray(inventory)) {
+    console.warn('getDashboardStats: Invalid inventory data');
+    return {
+      total: 0,
+      byStatus: {},
+      byLocation: {},
+      nextShipment: null,
+      overdueCount: 0,
+      inStockCount: 0,
+      installedCount: 0,
+      contractorCount: 0,
+      publicCount: 0
+    };
+  }
+
   const settings = await loadSettings();
   
-  // Create a combined locations array that includes contractors
-  const allLocations = [
-    ...settings.locations,
-    // Add contractors as locations with parent "contractor"
-    ...(settings.contractors || []).map(contractor => ({
-      name: contractor.name,
-      parent: "contractor"
-    }))
-  ];
+  // Get contractor names for direct matching
+  const contractorNames = (settings.contractors || []).map(c => c.name);
   
+  // Status breakdown
   const byStatus = {};
-  let contractorCount = 0, overdueCount = 0, publicCount = 0;
-  let inStockCount = 0, installedCount = 0;
-  
-  inventory.forEach(i => {
-    const status = i.status || 'Unknown';
-    const location = i.location || '';
-    
-    // Count by status for the donut chart
+  inventory.forEach(item => {
+    const status = item.status || 'Unknown';
     byStatus[status] = (byStatus[status] || 0) + 1;
+  });
+
+  // Location breakdown with parent container logic
+  let inStockCount = 0;
+  let installedCount = 0; 
+  let contractorCount = 0;
+  let publicCount = 0;
+  let overdueCount = 0;
+
+  const now = Date.now();
+
+  inventory.forEach(item => {
+    const location = settings.locations?.find(loc => loc.name === item.location);
+    const parentType = location?.parent;
     
-    // Find location's parent container using the combined locations array
-    const locationObj = allLocations.find(loc => loc.name === location);
-    const parentId = locationObj?.parent || "other";
+    // Count by parent type
+    switch(parentType) {
+      case 'warehouse':
+        inStockCount++;
+        break;
+      case 'customer':
+        installedCount++;
+        break;
+      case 'contractor':
+        contractorCount++;
+        break;
+      case 'public':
+        publicCount++;
+        break;
+    }
     
-    // Count by PARENT CONTAINER TYPE
-    if (parentId === "warehouse") {
-      inStockCount++; // Items at warehouse locations = "In Stock"
-    } else if (parentId === "customer") {
-      installedCount++; // Items at customer locations = "Installed"  
-    } else if (parentId === "contractor") {
-      contractorCount++; // Items at contractor locations = "With Contractors"
-      
-      // Check if overdue (>14 days with contractor)
-      const now = Date.now();
-      const assignedDate = i.assignedDate ? new Date(i.assignedDate).getTime() : 0;
-      if (assignedDate && now - assignedDate > 14 * 24 * 60 * 60 * 1000) {
-        overdueCount++;
+    // FIXED: Also check if location name matches contractor name directly
+    if (!location?.parent && contractorNames.includes(item.location)) {
+      contractorCount++;
+    }
+    
+    // FIXED: Check for overdue contractor assignments (> 14 days)
+    // Use assignedDate if available, otherwise fall back to lastAction for existing data
+    const assignmentDate = item.assignedDate || item.lastAction;
+    if (assignmentDate) {
+      const isWithContractor = 
+        parentType === 'contractor' || // Has contractor parent
+        contractorNames.includes(item.location) || // Location matches contractor name
+        item.contractorId || // Has contractor ID field
+        item.status === 'Reserved'; // Reserved status items
+        
+      if (isWithContractor) {
+        const daysPassed = (now - new Date(assignmentDate).getTime()) / (1000 * 60 * 60 * 24);
+        if (daysPassed > 14) {
+          overdueCount++;
+        }
       }
-    } else if (parentId === "public") {
-      publicCount++; // Items at public locations = "Public Assets"
     }
   });
-  
-  // Enhanced debug logging
-  console.log('Dashboard Stats Debug:', {
-    total: inventory.length,
-    inStockCount: `${inStockCount} (warehouse locations)`,
-    installedCount: `${installedCount} (customer locations)`, 
-    contractorCount: `${contractorCount} (contractor locations)`,
-    publicCount: `${publicCount} (public locations)`,
-    contractorNames: (settings.contractors || []).map(c => c.name),
-    allLocations: allLocations.map(loc => ({ name: loc.name, parent: loc.parent })),
-    byStatus
-  });
-  
-  // Get next shipment date
-  const nextShipment = shipments && shipments.length 
-    ? shipments.sort((a,b) => new Date(a.eta) - new Date(b.eta))
-      .find(s => new Date(s.eta) > new Date())
+
+  // Next shipment
+  const pendingShipments = shipments.filter(s => !s.arrived && s.eta);
+  const nextShipment = pendingShipments.length > 0 
+    ? Math.min(...pendingShipments.map(s => new Date(s.eta).getTime()))
     : null;
-  
+
+  console.log('Dashboard stats calculated:', {
+    total: inventory.length,
+    byStatus,
+    inStockCount,
+    installedCount,
+    contractorCount,
+    publicCount,
+    overdueCount,
+    contractorNames: contractorNames.length
+  });
+
   return {
     total: inventory.length,
     byStatus,
-    contractorCount,
+    byLocation: {}, // Can add location breakdown if needed
+    nextShipment,
     overdueCount,
-    publicCount,
     inStockCount,
     installedCount,
-    nextShipment: nextShipment ? new Date(nextShipment.eta).getTime() : null
+    contractorCount,
+    publicCount
   };
 }
 
@@ -407,15 +459,33 @@ function showEntryWithParentDialog(title, initValue = "", initParent = "") {
     }
   }
 
-async function onDeleteItem(type, idx) {
-  showConfirmDialog(`Delete this item?`).then(async ok => {
-    if (!ok) return;
-    settings[type].splice(idx, 1);
-    await saveSettings(settings);
-    renderList(type, getListId(type));
-    showToast("Item deleted!", "red");
-  });
-}
+  async function onDeleteItem(type, idx) {
+    // Add validation for locations
+    if (type === "locations") {
+      const locationName = settings[type][idx].name;
+      // Check if location is in use by inventory
+      try {
+        const inventory = await loadInventory();
+        const itemsAtLocation = inventory.filter(i => i.location === locationName);
+        if (itemsAtLocation.length > 0) {
+          return showToast(
+            `Cannot delete - ${itemsAtLocation.length} inventory items are at this location!`, 
+            "red"
+          );
+        }
+      } catch (error) {
+        console.warn('Could not check location usage:', error);
+      }
+    }
+  
+    showConfirmDialog(`Delete this item?`).then(async ok => {
+      if (!ok) return;
+      settings[type].splice(idx, 1);
+      await saveSettings(settings);
+      renderList(type, getListId(type));
+      showToast("Item deleted!", "red");
+    });
+  }
 
 async function reorderItem(type, fromIdx, toIdx) {
   const arr = settings[type];
@@ -624,6 +694,13 @@ async function onAddParentContainer() {
     if (!result) return;
     const { id, name, color } = result;
     if (!id || !name) return;
+    
+    // Check for duplicate IDs
+    if (settings.parentContainers.some(p => p.id === id)) {
+      showToast(`A parent container with ID "${id}" already exists!`, "red");
+      return;
+    }
+    
     if (!Array.isArray(settings.parentContainers)) settings.parentContainers = [];
     settings.parentContainers.push({ id, name, color });
     await saveSettings(settings);
@@ -669,17 +746,87 @@ async function onDeleteParentContainer(idx) {
 
 
 export async function initSettings() {
-  settings = await loadSettings();
-  renderParentContainerList();
-  renderList("locations", "locList");
-  renderList("statuses", "statList");
-  renderList("vendors", "vendorList");
-  renderContractorList();
+  try {
+    console.log('Starting settings initialization...');
+    
+    // FIXED: Check permissions with proper container selector
+    const hasAccess = await checkPageAccess('settings');
+    if (!hasAccess) {
+      const userRole = await getCurrentUserRole();
+      if (userRole === 'Agent') {
+        console.log('Agent trying to access settings, redirecting to inventory');
+        window.location.href = '/inventory.html';
+        return;
+      }
+      console.log('Access denied to settings page');
+      renderAccessDenied('section'); // FIXED: Use 'section' instead of default
+      return;
+    }
 
-  // Add the new button handler
-  document.getElementById("addParentContainerBtn")?.addEventListener("click", onAddParentContainer);
-  document.getElementById("addContractorBtn")?.addEventListener("click", onAddContractor);
-  document.getElementById("addLocBtn")?.addEventListener("click", () => onAddItem("locations", "locList", "Location"));
-  document.getElementById("addStatBtn")?.addEventListener("click", () => onAddItem("statuses", "statList", "Status"));
-  document.getElementById("addVendorBtn")?.addEventListener("click", () => onAddItem("vendors", "vendorList", "Vendor"));
+    console.log('Loading settings data...');
+    settings = await loadSettings();
+    console.log('Settings loaded:', settings);
+    
+    // Render all sections
+    renderParentContainerList();
+    renderList("locations", "locList");
+    renderList("statuses", "statList");
+    renderList("vendors", "vendorList");
+    renderContractorList();
+
+    // Set up event listeners with null checks
+    const addParentBtn = document.getElementById("addParentContainerBtn");
+    if (addParentBtn) {
+      addParentBtn.addEventListener("click", onAddParentContainer);
+    }
+    
+    const addContractorBtn = document.getElementById("addContractorBtn");
+    if (addContractorBtn) {
+      addContractorBtn.addEventListener("click", onAddContractor);
+    }
+    
+    const addLocBtn = document.getElementById("addLocBtn");
+    if (addLocBtn) {
+      addLocBtn.addEventListener("click", () => onAddItem("locations", "locList", "Location"));
+    }
+    
+    const addStatBtn = document.getElementById("addStatBtn");
+    if (addStatBtn) {
+      addStatBtn.addEventListener("click", () => onAddItem("statuses", "statList", "Status"));
+    }
+    
+    const addVendorBtn = document.getElementById("addVendorBtn");
+    if (addVendorBtn) {
+      addVendorBtn.addEventListener("click", () => onAddItem("vendors", "vendorList", "Vendor"));
+    }
+
+    console.log('Settings page initialized successfully');
+    
+  } catch (error) {
+    console.error('Failed to initialize settings:', error);
+    showToast('Failed to load settings: ' + error.message, 'red');
+    
+    // Show error in the main section
+    const section = document.querySelector('section');
+    if (section) {
+      section.innerHTML = `
+        <div class="flex items-center justify-center min-h-[60vh]">
+          <div class="text-center max-w-md mx-auto p-8">
+            <div class="w-16 h-16 mx-auto mb-4 text-red-400">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="w-full h-full">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                      d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+            <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">Settings Error</h2>
+            <p class="text-gray-500 dark:text-gray-400 mb-4">Failed to load settings: ${error.message}</p>
+            <button onclick="window.location.reload()" 
+                    class="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition font-medium">
+              Retry
+            </button>
+          </div>
+        </div>
+      `;
+    }
+  }
 }

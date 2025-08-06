@@ -64,8 +64,30 @@ export async function login(email, password) {
 }
 
 export async function logout() {
+  try {
+    console.log('Logout initiated...');
+    // Clear all cached data FIRST
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('lastUserRole');
+    localStorage.removeItem('mobileStartPage');
+    localStorage.removeItem('lastPage');
+    console.log('localStorage cleared');
+    // Sign out from Firebase
     await signOut(auth);
+    console.log('Firebase signout completed');
+    // Force redirect to login page immediately
+    window.location.replace('/login.html');
+  } catch (error) {
+    console.error('Logout error:', error);
+    // Force redirect even if Firebase signout fails
+    setTimeout(() => {
+      window.location.replace('/login.html');
+    }, 1000);
+  }
 }
+
+// Make it globally available
+window.logout = logout;
 export async function getCurrentUserRole() {
   const user = getCurrentUser();
   if (!user) return null;

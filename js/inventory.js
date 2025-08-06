@@ -1,6 +1,6 @@
 // inventory.js (starter for Inventory Management tab)
 
-import { showToast } from './core.js';
+import { showToast, showToastWithAction } from './core.js';
 import { getAllowedStatusesForLocation, loadSettings } from './settings.js';
 import { getCurrentUserRole, getCurrentUserEmail } from './utils/users.js';
 import { can } from './utils/permissions.js';
@@ -44,7 +44,18 @@ async function isAdmin() {
 }
 
 async function canManageInventory() {
+  const userRole = await getCurrentUserRole();
+  
+  // Agents can view inventory but cannot add/bulk add/create shipments
+  if (userRole === 'Agent') {
+    return false;
+  }
+  
   return await can('inventoryCrud');
+}
+
+async function canMoveInventory() {
+  return await canManageInventory();
 }
 
 async function canDeleteItems() {
@@ -86,6 +97,38 @@ function getFilteredInventory() {
   
   return filtered;
 }
+
+  // Helper functions for hierarchy logic
+  async function isStorage(location) {
+    if (!location) return false;
+    const settings = await loadSettings();
+    const allLocations = await getAllLocationsWithContractors();
+    const locationObj = allLocations.find(l => l.name === location);
+    return locationObj?.parent === "warehouse";
+  }
+  
+  async function isInstalled(location) {
+    if (!location) return false;
+    const allLocations = await getAllLocationsWithContractors();
+    const locationObj = allLocations.find(l => l.name === location);
+    return locationObj?.parent === "customer" || locationObj?.parent === "public";
+  }
+  
+  // Add this helper function to get installed locations dynamically
+  async function getInstalledLocations() {
+    const allLocations = await getAllLocationsWithContractors();
+    return allLocations
+      .filter(l => l.parent === "customer" || l.parent === "public")
+      .map(l => l.name);
+  }
+  
+  // Add this helper function to get contractor locations dynamically  
+  async function getContractorLocations() {
+    const allLocations = await getAllLocationsWithContractors();
+    return allLocations
+      .filter(l => l.parent === "contractor")
+      .map(l => l.name);
+  }
 
 // 1) Load entire inventory from Firestore
 export async function loadInventory() {
@@ -135,7 +178,8 @@ export async function saveInventory(list) {
         notes: unit.notes || "",
         ...(unit.isAsset !== undefined && { isAsset: unit.isAsset }),
         ...(unit.invoiceNumber && { invoiceNumber: unit.invoiceNumber }),
-        ...(unit.contractorId && { contractorId: unit.contractorId })
+        ...(unit.contractorId && { contractorId: unit.contractorId }),
+        ...(unit.assignedDate && { assignedDate: unit.assignedDate })
       });
     });
     
@@ -169,7 +213,8 @@ export async function updateSingleItem(item) {
       notes: item.notes || "",
       ...(item.isAsset !== undefined && { isAsset: item.isAsset }),
       ...(item.invoiceNumber && { invoiceNumber: item.invoiceNumber }),
-      ...(item.contractorId && { contractorId: item.contractorId })
+      ...(item.contractorId && { contractorId: item.contractorId }),
+      ...(item.assignedDate && { assignedDate: item.assignedDate })
     });
     
     // Update the global inventory array
@@ -191,17 +236,31 @@ function listenToInventoryUpdates() {
   inventoryUnsubscribe = colRef.onSnapshot(
     debounce((snapshot) => {
       try {
-        window.inventory = snapshot.docs.map(doc => ({ chargerId: doc.id, ...doc.data() }));
-        if (document.body.dataset.page === "inventory" && 
-            document.getElementById('main-content') && 
-            !window.isInitialLoad) {
-          renderTableRows();
+        const newInventory = snapshot.docs.map(doc => ({ chargerId: doc.id, ...doc.data() }));
+        
+        // More robust condition: only skip if initial load is happening AND no data exists
+        const shouldUpdate = window.isInitialLoad === false || 
+                           (window.isInitialLoad === true && window.inventory.length === 0 && newInventory.length > 0);
+        
+        if (shouldUpdate) {
+          console.log('Updating inventory from real-time listener:', newInventory.length, 'items');
+          window.inventory = newInventory;
+          
+          // Only re-render if we're on the inventory page and DOM is ready and initial load is complete
+          if (document.body.dataset.page === "inventory" && 
+              document.getElementById('main-content') && 
+              window.isInitialLoad === false) {
+            console.log('Real-time update: re-rendering inventory table');
+            renderTableRows();
+          }
+        } else {
+          console.log('Skipping real-time update during initial load');
         }
       } catch (error) {
         console.error('Real-time update failed:', error);
         showToast('Connection issue - please refresh', 'yellow');
       }
-    }, 500),
+    }, 750), // Increase debounce time for mobile
     (error) => {
       console.error('Firestore listener error:', error);
       showToast('Database connection lost - please refresh', 'red');
@@ -216,6 +275,11 @@ window.addEventListener('beforeunload', () => {
   }
   // Clear search cache
   window._globalSearchCache = null;
+  // Add: Clear unit data map to prevent memory leaks
+  if (window._unitDataMap) {
+    window._unitDataMap.clear();
+    window._unitDataMap = null;
+  }
 });
 
 async function safeFirebaseOperation(operation, operationName) {
@@ -614,31 +678,36 @@ renderInventoryTable(document.getElementById('main-content'));
       showToast("You don't have permission to delete items", "red");
       return;
     }
-
+  
     if (!confirm(`Are you sure you want to delete ${window.selectedUnits.length} unit(s)?`)) return;
   
-    // Use batch delete
-    const batch = window.db.batch();
-    window.selectedUnits.forEach(chargerId => {
-      batch.delete(window.db.collection("inventory").doc(chargerId));
-    });
-    await batch.commit();
+    try {
+      // Use batch delete
+      const batch = window.db.batch();
+      window.selectedUnits.forEach(chargerId => {
+        batch.delete(window.db.collection("inventory").doc(chargerId));
+      });
+      await batch.commit();
   
-    // Update local inventory
-    window.inventory = window.inventory.filter(i => !window.selectedUnits.includes(i.chargerId));
+      // Update local inventory
+      window.inventory = window.inventory.filter(i => !window.selectedUnits.includes(i.chargerId));
   
-    // Log deletions
-    const newEntries = window.selectedUnits.map(chargerId => ({
-      date: new Date().toISOString(),
-      action: "Bulk Delete",
-      chargerId,
-      user: getCurrentUserEmail()
-    }));
-    await saveAuditLog(newEntries);
+      // Log deletions
+      const newEntries = window.selectedUnits.map(chargerId => ({
+        date: new Date().toISOString(),
+        action: "Bulk Delete",
+        chargerId,
+        user: getCurrentUserEmail()
+      }));
+      await saveAuditLog(newEntries);
   
-    showToast(`Deleted ${window.selectedUnits.length} unit(s)`, "red");
-    window.selectedUnits = [];
-    renderInventoryTable(document.getElementById('main-content'));
+      showToast(`Deleted ${window.selectedUnits.length} unit(s)`, "red");
+      window.selectedUnits = [];
+      renderInventoryTable(document.getElementById('main-content'));
+    } catch (error) {
+      console.error('Bulk delete failed:', error);
+      showToast('Delete failed: ' + error.message, 'red');
+    }
   };
 
   window.clearBulkSelection = function() {
@@ -678,12 +747,14 @@ renderInventoryTable(document.getElementById('main-content'));
     // Check if user can manage inventory (for CRUD operations)
     const canManage = await canManageInventory();
     const isSuper = await isSuperAdmin();
+    const userRole = await getCurrentUserRole();
     
-    // Remove FABs if on mobile or user can't manage inventory
-    if (window.innerWidth < 640 || !canManage) {
-      ['addItemBtn', 'bulkAddBtn', 'addShipmentBtn'].forEach(id => {
-        const btn = document.getElementById(id);
-        if (btn) btn.remove();
+    // FIXED: Hide FABs for Agents and mobile users, or users without manage permissions
+    if (window.innerWidth < 640 || !canManage || userRole === 'Agent') {
+      console.log('FABs hidden for:', { 
+        mobile: window.innerWidth < 640, 
+        canManage, 
+        userRole 
       });
       return;
     }
@@ -693,7 +764,10 @@ renderInventoryTable(document.getElementById('main-content'));
       document.getElementById('addItemBtn') ||
       document.getElementById('bulkAddBtn') ||
       document.getElementById('addShipmentBtn')
-    ) return;
+    ) {
+      console.log('FABs already exist, skipping injection');
+      return;
+    }
   
     const fabHTML = `
       <button id="addShipmentBtn"
@@ -749,89 +823,137 @@ renderInventoryTable(document.getElementById('main-content'));
 // Initial load
 document.addEventListener('DOMContentLoaded', async () => {
   if (document.body.dataset.page === "inventory") {
-    window.isInitialLoad = true;
-    
     try {
-      // Show loading screen for inventory
       showInventoryLoadingScreen();
+      updateInventoryLoadingProgress('Initializing inventory system...');
       
-      updateInventoryLoadingProgress('Initializing Firebase connection...');
-      
-      // Wait for Firebase to be ready
-      let retryCount = 0;
-      while (!window.db && retryCount < 50) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        retryCount++;
-      }
-
+      // Wait for Firebase with better error handling
       if (!window.db) {
-        throw new Error('Firebase not initialized after 5 seconds');
+        updateInventoryLoadingProgress('Waiting for database connection...');
+        await new Promise((resolve, reject) => {
+          let attempts = 0;
+          const maxAttempts = 150; // Increase to 15 seconds for mobile
+          
+          const checkDb = () => {
+            attempts++;
+            if (window.db && window.auth) { // Check both db and auth
+              console.log('Firebase ready, db:', !!window.db, 'auth:', !!window.auth);
+              resolve();
+            } else if (attempts >= maxAttempts) {
+              reject(new Error('Database connection timeout - please check your internet connection'));
+            } else {
+              setTimeout(checkDb, 100);
+            }
+          };
+          checkDb();
+        });
       }
 
       updateInventoryLoadingProgress('Loading inventory data...');
-      console.log('Loading inventory data...');
-      window.inventory = await loadInventory();
-      console.log('Inventory loaded:', window.inventory.length, 'items');
       
-      updateInventoryLoadingProgress('Setting up user interface...');
-      // Render UI components
-      await injectInventoryFABs();
-      renderInventoryTable(document.getElementById('main-content'));
+      // Load inventory with proper timeout handling
+      const isMobile = window.innerWidth < 900;
+      const timeoutDuration = isMobile ? 45000 : 20000; // Increase mobile timeout
+      
+      const loadPromise = loadInventory();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Loading timeout - please check your connection and try again')), timeoutDuration)
+      );
+      
+      try {
+        window.inventory = await Promise.race([loadPromise, timeoutPromise]);
+        console.log('Inventory loaded successfully:', window.inventory.length, 'items');
+      } catch (error) {
+        // Retry once before giving up
+        console.log('First load attempt failed, retrying...');
+        updateInventoryLoadingProgress('Retrying connection...');
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+        window.inventory = await Promise.race([loadInventory(), timeoutPromise]);
+        console.log('Inventory loaded on retry:', window.inventory.length, 'items');
+      }
+      
+      updateInventoryLoadingProgress('Setting up interface...');
+      
+      // Determine layout mode
+      currentLayoutMode = shouldUseMobileLayout() ? 'mobile' : 'desktop';
+      
+      // Initialize proper view
+      const main = document.getElementById('main-content');
+      if (!main) {
+        throw new Error('Main content area not found');
+      }
 
-      // Force resize event for layout adjustments
-      window.dispatchEvent(new Event('resize'));
+      if (currentLayoutMode === 'mobile') {
+        await renderInventoryMobile(main, window.inventory);
+      } else {
+        await renderInventoryTable(main);
+      }
 
-      updateInventoryLoadingProgress('Initializing features...');
-      // Initialize all event handlers and listeners in proper sequence
-      setTimeout(() => {
-        // Attach download handlers explicitly AFTER DOM is stable
+      updateInventoryLoadingProgress('Finalizing...');
+      
+      // Setup additional features with error handling
+      try {
+        await injectInventoryFABs();
         attachDownloadHandlers();
-        
-        // Initialize search functionality
-        initializeInventorySearch();
-        
-        // Attach hover legends
         attachHoverLegends();
-        
-        // Handle pending actions
         handlePendingActions();
-        
-        updateInventoryLoadingProgress('Starting real-time updates...');
-        
-        // Mark initial load complete and start real-time updates
-        window.isInitialLoad = false;
+      } catch (error) {
+        console.error('Error setting up additional features:', error);
+        // Continue anyway - these are non-critical features
+      }
+      
+      // IMPORTANT: Mark initial load as complete BEFORE setting up listeners
+      window.isInitialLoad = false;
+      
+      // Setup real-time listener AFTER initial load is complete and UI is rendered
+      try {
+        await new Promise(resolve => setTimeout(resolve, 500)); // Small delay
         listenToInventoryUpdates();
-        
-        updateInventoryLoadingProgress('Inventory ready!');
-        
-        // Hide loading screen
-        setTimeout(() => {
-          hideInventoryLoadingScreen();
-        }, 500);
-      }, 150);
+      } catch (error) {
+        console.error('Error setting up real-time updates:', error);
+        showToast('Real-time updates disabled due to connection issues', 'yellow');
+      }
 
-    } catch (error) {
-      console.error('Failed to load inventory:', error);
       hideInventoryLoadingScreen();
-      const mainContent = document.getElementById('main-content');
-      if (mainContent) {
-        mainContent.innerHTML = `
-          <div class="flex items-center justify-center h-screen">
-            <div class="text-center">
-              <div class="text-red-500 mb-4">
-                <svg class="w-16 h-16 mx-auto" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+      document.body.style.visibility = 'visible';
+      
+    } catch (error) {
+      console.error('Failed to initialize inventory:', error);
+      hideInventoryLoadingScreen();
+      
+      // Show user-friendly error message with retry options
+      const main = document.getElementById('main-content');
+      if (main) {
+        main.innerHTML = `
+          <div class="flex items-center justify-center min-h-[60vh]">
+            <div class="text-center max-w-md mx-auto p-8">
+              <div class="w-16 h-16 mx-auto mb-4 text-red-400">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="w-full h-full">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                        d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                 </svg>
               </div>
-              <p class="text-red-600 mb-4">Failed to load inventory</p>
-              <button onclick="location.reload()" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">
-                Retry
-              </button>
+              <h2 class="text-xl font-semibold text-gray-700 mb-2">Loading Failed</h2>
+              <p class="text-gray-500 mb-4">${error.message}</p>
+              <div class="space-y-2">
+                <button onclick="window.location.reload()" 
+                        class="block w-full px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition font-medium">
+                  Reload Page
+                </button>
+                <button onclick="window.history.back()" 
+                        class="block w-full px-6 py-3 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition font-medium">
+                  Go Back
+                </button>
+              </div>
+              <p class="text-xs text-gray-400 mt-4">
+                If this problem persists, check your internet connection or contact support.
+              </p>
             </div>
           </div>
         `;
       }
-      showToast('Failed to load inventory data. Please refresh the page.', 'red');
+      
+      showToast('Failed to load inventory: ' + error.message, 'red');
     }
   }
 });
@@ -942,69 +1064,123 @@ async function getStatusesForLocation(location) {
   return allowedStatuses;
 }
 
+window.inventorySorting = {
+  column: null,
+  direction: 'asc' // 'asc' or 'desc'
+};
 
 
-function renderInventoryTable(main) {
+async function renderInventoryTable(main) {
   if (shouldUseMobileLayout()) {
     renderInventoryMobile(main, window.inventory);
     return;
   }
+
+  const canManage = await canManageInventory();
+  const canDelete = await canDeleteItems();
+  const userRole = await getCurrentUserRole();
+  
+  // Define the unsorted icon for initial render
+  const unsortedIcon = `<svg class="w-3 h-3 text-gray-400" fill="currentColor" viewBox="0 0 12 12">
+    <path d="M6 2l2.5 2.5H3.5L6 2z"/>
+    <path d="M6 10L3.5 7.5h5L6 10z"/>
+  </svg>`;
   
   main.innerHTML = `
-    <div class="flex flex-wrap gap-3 mb-4 items-center">
-      <input id="searchInput" type="text" placeholder="Search Anything" class="border px-3 py-1 rounded" style="min-width:200px;">
+  <div class="flex flex-wrap gap-3 mb-4 items-center">
+    <input id="searchInput" type="text" placeholder="Search Anything" class="border px-3 py-1 rounded" style="min-width:200px;">
 
-            <!-- Multi-select Status Filter -->
-      <div class="relative">
-        <button id="statusFilterBtn" class="border px-3 py-1 rounded bg-white flex items-center gap-2 min-w-32">
-          <span id="statusFilterText">All Statuses</span>
-          <span>▼</span>
-        </button>
-        <div id="statusFilterDropdown" class="absolute top-full left-0 mt-1 bg-white border rounded shadow-lg z-50 hidden min-w-48 max-h-60 overflow-y-auto">
-          <div class="p-2 border-b">
-            <label class="flex items-center gap-2 text-sm font-semibold">
-              <input type="checkbox" id="selectAllStatuses">
-              Select All
-            </label>
-          </div>
-          <div id="statusCheckboxes" class="p-2 space-y-1"></div>
+    <!-- Multi-select Status Filter -->
+    <div class="relative">
+      <button id="statusFilterBtn" class="border px-3 py-1 rounded bg-white flex items-center gap-2 min-w-32">
+        <span id="statusFilterText">All Statuses</span>
+        <span>▼</span>
+      </button>
+      <div id="statusFilterDropdown" class="absolute top-full left-0 mt-1 bg-white border rounded shadow-lg z-50 hidden min-w-48 max-h-60 overflow-y-auto">
+        <div class="p-2 border-b">
+          <label class="flex items-center gap-2 text-sm font-semibold">
+            <input type="checkbox" id="selectAllStatuses">
+            Select All
+          </label>
         </div>
+        <div id="statusCheckboxes" class="p-2 space-y-1"></div>
       </div>
-      
-      <!-- Multi-select Location Filter -->
-      <div class="relative">
-        <button id="locationFilterBtn" class="border px-3 py-1 rounded bg-white flex items-center gap-2 min-w-32">
-          <span id="locationFilterText">All Locations</span>
-          <span>▼</span>
-        </button>
-        <div id="locationFilterDropdown" class="absolute top-full left-0 mt-1 bg-white border rounded shadow-lg z-50 hidden min-w-48 max-h-60 overflow-y-auto">
-          <div class="p-2 border-b">
-            <label class="flex items-center gap-2 text-sm font-semibold">
-              <input type="checkbox" id="selectAllLocations">
-              Select All
-            </label>
-          </div>
-          <div id="locationCheckboxes" class="p-2 space-y-1"></div>
-        </div>
-      </div>
-      
-      <button id="downloadCSV" class="bg-gray-200 px-3 py-1 rounded">Download CSV</button>
-      <button id="downloadExcel" class="bg-gray-200 px-3 py-1 rounded">Download Excel</button>
     </div>
+    
+    <!-- Multi-select Location Filter -->
+    <div class="relative">
+      <button id="locationFilterBtn" class="border px-3 py-1 rounded bg-white flex items-center gap-2 min-w-32">
+        <span id="locationFilterText">All Locations</span>
+        <span>▼</span>
+      </button>
+      <div id="locationFilterDropdown" class="absolute top-full left-0 mt-1 bg-white border rounded shadow-lg z-50 hidden min-w-48 max-h-60 overflow-y-auto">
+        <div class="p-2 border-b">
+          <label class="flex items-center gap-2 text-sm font-semibold">
+            <input type="checkbox" id="selectAllLocations">
+            Select All
+          </label>
+        </div>
+        <div id="locationCheckboxes" class="p-2 space-y-1"></div>
+      </div>
+    </div>
+    
+    <button id="downloadCSV" class="bg-gray-200 px-3 py-1 rounded">Download CSV</button>
+    <button id="downloadExcel" class="bg-gray-200 px-3 py-1 rounded">Download Excel</button>
+  </div>
     <div class="inventory-scroll-area min-h-[340px] overflow-x-auto" style="max-height:70vh;">
       <div class="min-w-max">
         <table class="w-full table-auto border rounded-xl bg-white dark:bg-gray-900 shadow" style="min-width: 1200px;">
           <thead class="table-header">
             <tr>
               <th class="p-2 border-b w-12 resize-x overflow-hidden"><input type="checkbox" id="selectAll"></th>
-              <th class="p-2 border-b min-w-32 resize-x overflow-hidden">Model</th>
-              <th class="p-2 border-b min-w-32 resize-x overflow-hidden">Charger ID</th>
-              <th class="p-2 border-b min-w-24 resize-x overflow-hidden">Serial</th>
-              <th class="p-2 border-b min-w-28 resize-x overflow-hidden">SIM Number</th>
-              <th class="p-2 border-b min-w-20 resize-x overflow-hidden">Status</th>
-              <th class="p-2 border-b min-w-24 resize-x overflow-hidden">Location</th>
-              <th class="p-2 border-b min-w-32 resize-x overflow-hidden">Comment</th>
-              <th class="p-2 border-b min-w-32 resize-x overflow-hidden">Last Action</th>
+              <th class="p-2 border-b min-w-32 resize-x overflow-hidden sortable-header" data-column="model">
+                <div class="flex items-center justify-between cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 px-2 py-1 rounded transition-colors">
+                  <span class="font-medium">Model</span>
+                  <span class="sort-indicator text-gray-400 ml-1 flex-shrink-0">${unsortedIcon}</span>
+                </div>
+              </th>
+              <th class="p-2 border-b min-w-32 resize-x overflow-hidden sortable-header" data-column="chargerId">
+                <div class="flex items-center justify-between cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 px-2 py-1 rounded transition-colors">
+                  <span class="font-medium">Charger ID</span>
+                  <span class="sort-indicator text-gray-400 ml-1 flex-shrink-0">${unsortedIcon}</span>
+                </div>
+              </th>
+              <th class="p-2 border-b min-w-24 resize-x overflow-hidden sortable-header" data-column="chargerSerial">
+                <div class="flex items-center justify-between cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 px-2 py-1 rounded transition-colors">
+                  <span class="font-medium">Serial</span>
+                  <span class="sort-indicator text-gray-400 ml-1 flex-shrink-0">${unsortedIcon}</span>
+                </div>
+              </th>
+              <th class="p-2 border-b min-w-28 resize-x overflow-hidden sortable-header" data-column="simNumber">
+                <div class="flex items-center justify-between cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 px-2 py-1 rounded transition-colors">
+                  <span class="font-medium">SIM Number</span>
+                  <span class="sort-indicator text-gray-400 ml-1 flex-shrink-0">${unsortedIcon}</span>
+                </div>
+              </th>
+              <th class="p-2 border-b min-w-20 resize-x overflow-hidden sortable-header" data-column="status">
+                <div class="flex items-center justify-between cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 px-2 py-1 rounded transition-colors">
+                  <span class="font-medium">Status</span>
+                  <span class="sort-indicator text-gray-400 ml-1 flex-shrink-0">${unsortedIcon}</span>
+                </div>
+              </th>
+              <th class="p-2 border-b min-w-24 resize-x overflow-hidden sortable-header" data-column="location">
+                <div class="flex items-center justify-between cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 px-2 py-1 rounded transition-colors">
+                  <span class="font-medium">Location</span>
+                  <span class="sort-indicator text-gray-400 ml-1 flex-shrink-0">${unsortedIcon}</span>
+                </div>
+              </th>
+              <th class="p-2 border-b min-w-32 resize-x overflow-hidden sortable-header" data-column="notes">
+                <div class="flex items-center justify-between cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 px-2 py-1 rounded transition-colors">
+                  <span class="font-medium">Comment</span>
+                  <span class="sort-indicator text-gray-400 ml-1 flex-shrink-0">${unsortedIcon}</span>
+                </div>
+              </th>
+              <th class="p-2 border-b min-w-32 resize-x overflow-hidden sortable-header" data-column="lastAction">
+                <div class="flex items-center justify-between cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 px-2 py-1 rounded transition-colors">
+                  <span class="font-medium">Last Action</span>
+                  <span class="sort-indicator text-gray-400 ml-1 flex-shrink-0">${unsortedIcon}</span>
+                </div>
+              </th>
               <th class="p-2 border-b w-20">Actions</th>
             </tr>
           </thead>
@@ -1016,6 +1192,20 @@ function renderInventoryTable(main) {
     <div id="paginationBar"></div>
   `;
 
+  if (canManage && userRole !== 'Agent') {
+    main.querySelector('#fabAdd')?.addEventListener('click', () => {
+      if (typeof openAddDialog === 'function') {
+        openAddDialog();
+      }
+    });
+    
+    main.querySelector('#addUnitBtn')?.addEventListener('click', () => {
+      if (typeof openAddDialog === 'function') {
+        openAddDialog();
+      }
+    });
+  }
+
     if (!window.inventoryFilters) {
       window.inventoryFilters = {
         selectedStatuses: new Set(),
@@ -1023,15 +1213,125 @@ function renderInventoryTable(main) {
       };
     }
 
+    // Initialize sortable headers
+    initializeSortableHeaders();
+
     // First render the table rows
-        renderTableRows();
+    renderTableRows();
     
     // Then initialize search after DOM is ready
     setTimeout(() => {
       initializeInventorySearch();
       initializeMultiSelectFilters();
     }, 50);
+}
+
+function initializeSortableHeaders() {
+  const main = document.getElementById('main-content');
+  if (!main) return;
+
+  const sortableHeaders = main.querySelectorAll('.sortable-header');
+  
+  sortableHeaders.forEach(header => {
+    header.addEventListener('click', (e) => {
+      const column = header.dataset.column;
+      
+      // Update sorting state
+      if (window.inventorySorting.column === column) {
+        // Same column - toggle direction
+        window.inventorySorting.direction = window.inventorySorting.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        // New column - default to ascending
+        window.inventorySorting.column = column;
+        window.inventorySorting.direction = 'asc';
+      }
+      
+      // Update visual indicators
+      updateSortIndicators();
+      
+      // Reset to first page when sorting
+      window.inventoryPage = 1;
+      
+      // Re-render table with sorted data
+      renderTableRows();
+    });
+  });
+}
+
+function updateSortIndicators() {
+  const main = document.getElementById('main-content');
+  if (!main) return;
+
+  // Define professional SVG icons
+  const unsortedIcon = `<svg class="w-3 h-3 text-gray-400" fill="currentColor" viewBox="0 0 12 12">
+    <path d="M6 2l2.5 2.5H3.5L6 2z"/>
+    <path d="M6 10L3.5 7.5h5L6 10z"/>
+  </svg>`;
+  
+  const ascIcon = `<svg class="w-3 h-3 text-blue-600 font-bold" fill="currentColor" viewBox="0 0 12 12">
+    <path d="M6 2l2.5 2.5H3.5L6 2z"/>
+  </svg>`;
+  
+  const descIcon = `<svg class="w-3 h-3 text-blue-600 font-bold" fill="currentColor" viewBox="0 0 12 12">
+    <path d="M6 10L3.5 7.5h5L6 10z"/>
+  </svg>`;
+
+  // Reset all indicators to unsorted state
+  const indicators = main.querySelectorAll('.sort-indicator');
+  indicators.forEach(indicator => {
+    indicator.innerHTML = unsortedIcon;
+    indicator.className = 'sort-indicator text-gray-400 ml-1 flex-shrink-0';
+  });
+
+  // Update active column indicator
+  if (window.inventorySorting.column) {
+    const activeHeader = main.querySelector(`[data-column="${window.inventorySorting.column}"]`);
+    if (activeHeader) {
+      const indicator = activeHeader.querySelector('.sort-indicator');
+      if (indicator) {
+        if (window.inventorySorting.direction === 'asc') {
+          indicator.innerHTML = ascIcon;
+        } else {
+          indicator.innerHTML = descIcon;
+        }
+        indicator.className = 'sort-indicator text-blue-600 ml-1 flex-shrink-0';
+      }
+    }
   }
+}
+
+function sortInventoryData(data) {
+  if (!window.inventorySorting.column) return data;
+
+  const column = window.inventorySorting.column;
+  const direction = window.inventorySorting.direction;
+
+  return [...data].sort((a, b) => {
+    let aValue = a[column] || '';
+    let bValue = b[column] || '';
+
+    // Handle special cases
+    if (column === 'lastAction') {
+      // Sort dates properly
+      aValue = new Date(aValue);
+      bValue = new Date(bValue);
+    } else {
+      // Convert to string and normalize for text comparison
+      aValue = String(aValue).toLowerCase();
+      bValue = String(bValue).toLowerCase();
+    }
+
+    let comparison = 0;
+    if (aValue < bValue) {
+      comparison = -1;
+    } else if (aValue > bValue) {
+      comparison = 1;
+    }
+
+    return direction === 'desc' ? comparison * -1 : comparison;
+  });
+}
+
 
   window.addEventListener('resize', () => {
     const newMode = shouldUseMobileLayout() ? 'mobile' : 'desktop';
@@ -1185,211 +1485,220 @@ function updateFilterUI() {
   }
   
 
-// Fix the renderTableRows function to properly handle async permissions
-async function renderTableRows() {
-  const main = document.getElementById('main-content');
-  if (!main) return; 
-  const canDelete = await canDeleteItems();
-  const searchInput = main.querySelector('#searchInput');
-  const tbody = main.querySelector('#inventoryTableBody');
-  if (!searchInput || !tbody) return;
-  const q = searchInput.value.toLowerCase();
+  async function renderTableRows() {
+    const main = document.getElementById('main-content');
+    if (!main) return; 
+
+    const canDelete = await canDeleteItems();
+
+    const searchInput = main.querySelector('#searchInput');
+    const tbody = main.querySelector('#inventoryTableBody');
+    if (!searchInput || !tbody) return;
+
+    const q = searchInput.value.toLowerCase();
+      
+    let filtered = window.inventory;
     
-  let filtered = window.inventory;
+    // Apply search filter
+    if (q) {
+      filtered = filtered.filter(i => {
+        const allFields = [
+          i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status,
+          i.location, i.notes, i.lastAction, i.addedBy, i.invoiceNumber
+        ];
+        return allFields.some(field => (field || '').toLowerCase().includes(q));
+      });
+    }
+    
+    // Apply status filter (NEW MULTI-SELECT LOGIC)
+    if (window.inventoryFilters?.selectedStatuses.size > 0) {
+      filtered = filtered.filter(i => window.inventoryFilters.selectedStatuses.has(i.status));
+    }
+    
+    // Apply location filter (NEW MULTI-SELECT LOGIC)
+    if (window.inventoryFilters?.selectedLocations.size > 0) {
+      filtered = filtered.filter(i => window.inventoryFilters.selectedLocations.has(i.location));
+    }
   
-  // Apply search filter
-  if (q) {
-    filtered = filtered.filter(i => {
-      const allFields = [
-        i.chargerId, i.chargerSerial, i.simNumber, i.product, i.model, i.status,
-        i.location, i.notes, i.lastAction, i.addedBy, i.invoiceNumber
-      ];
-      return allFields.some(field => (field || '').toLowerCase().includes(q));
-    });
-  }
+    // Apply sorting
+    filtered = sortInventoryData(filtered);
   
-  // Apply status filter (NEW MULTI-SELECT LOGIC)
-  if (window.inventoryFilters?.selectedStatuses.size > 0) {
-    filtered = filtered.filter(i => window.inventoryFilters.selectedStatuses.has(i.status));
-  }
+    // Update sort indicators
+    updateSortIndicators();
   
-  // Apply location filter (NEW MULTI-SELECT LOGIC)
-  if (window.inventoryFilters?.selectedLocations.size > 0) {
-    filtered = filtered.filter(i => window.inventoryFilters.selectedLocations.has(i.location));
-  }
-
-  const pageSize = window.inventoryPageSize;
-  const page = window.inventoryPage;
-  const startIdx = (page - 1) * pageSize;
-  const endIdx = startIdx + pageSize;
-  const paginated = filtered.slice(startIdx, endIdx);
-
-  // Only keep selectedUnits that are visible in the filtered list
-  window.selectedUnits = window.selectedUnits.filter(id => window.inventory.some(i => i.chargerId === id));
+    const pageSize = window.inventoryPageSize;
+    const page = window.inventoryPage;
+    const startIdx = (page - 1) * pageSize;
+    const endIdx = startIdx + pageSize;
+    const paginated = filtered.slice(startIdx, endIdx);
   
-  // Render table rows
-  tbody.innerHTML = paginated.map((unit, idx) => {
-    const unitKey = storeUnitData(unit, idx);
-    return `
-    <tr class="inv-row${window.selectedUnits.includes(unit.chargerId) ? ' selected' : ''}" data-idx="${idx}" data-id="${unit.chargerId}">
-        <td class="p-2 border-b text-center">
-          <input type="checkbox" data-chargerid="${unit.chargerId}" ${window.selectedUnits.includes(unit.chargerId) ? "checked" : ""}>
-        </td>
-        <td class="p-2 border-b table-cell">${unit.model || ""}</td>
-        <td class="p-2 border-b table-cell">${unit.chargerId}</td>
-        <td class="p-2 border-b table-cell">${unit.chargerSerial || ""}</td>
-        <td class="p-2 border-b table-cell">${unit.simNumber || ""}</td>
-        <td class="p-2 border-b table-cell">
-          <span class="rounded-full px-3 py-1 text-xs font-semibold"
-            style="
-              background:${getStatusColor(unit.status).bg};
-              color:${getStatusColor(unit.status).color};
-              display:inline-block;
-              min-width:86px;
-              text-align:center;
-              letter-spacing:0.03em;
-              box-shadow:0 1px 3px 0 #0001;
-            "
-          >${unit.status}</span>
-        </td>
-        <td class="p-2 border-b table-cell">
-          <span class="rounded-full px-3 py-1 text-xs font-semibold"
-            style="
-              background:${getLocationColor(unit.location).bg};
-              color:${getLocationColor(unit.location).color};
-              min-width: 86px;
-              display:inline-block;
-              text-align:center;
-              letter-spacing:0.03em;
-              box-shadow:0 1px 3px 0 #0001;
-            "
-          >${unit.location}</span>
-        </td>
-        <td class="p-2 border-b table-cell text-xs text-gray-600 max-w-32 truncate" title="${(unit.notes || '').replace(/"/g, '&quot;')}">${unit.notes || '-'}</td>
-        <td class="p-2 border-b table-cell">${new Date(unit.lastAction).toLocaleString()}</td>
-        <td class="p-2 border-b text-center relative table-dot-menu">
-          <button class="px-2 py-1 text-lg font-bold" onclick="event.stopPropagation();toggleRowMenu(${idx})">⋮</button>
-          <div class="table-dot-menu-content" id="row-menu-${idx}">
-            <button onclick="openDetailsDialogSafe('${unitKey}')">Details</button>
-            <button onclick="openMoveDialogSafe('${unitKey}')">Move</button>
-            <button onclick="openStatusDialogSafe('${unitKey}')">Change Status</button>
-            <button onclick="openEditDialogSafe('${unitKey}')">Edit</button>
-            ${canDelete ? `<button class="delete" onclick='deleteUnit("${unit.chargerId}")'>Delete</button>` : ""}
+    // Only keep selectedUnits that are visible in the filtered list
+    window.selectedUnits = window.selectedUnits.filter(id => window.inventory.some(i => i.chargerId === id));
+    
+    // Render table rows
+    tbody.innerHTML = paginated.map((unit, idx) => {
+      const unitKey = storeUnitData(unit, idx);
+      return `
+      <tr class="inv-row${window.selectedUnits.includes(unit.chargerId) ? ' selected' : ''}" data-idx="${idx}" data-id="${unit.chargerId}">
+          <td class="p-2 border-b text-center">
+            <input type="checkbox" data-chargerid="${unit.chargerId}" ${window.selectedUnits.includes(unit.chargerId) ? "checked" : ""}>
+          </td>
+          <td class="p-2 border-b table-cell">${unit.model || ""}</td>
+          <td class="p-2 border-b table-cell">${unit.chargerId}</td>
+          <td class="p-2 border-b table-cell">${unit.chargerSerial || ""}</td>
+          <td class="p-2 border-b table-cell">${unit.simNumber || ""}</td>
+          <td class="p-2 border-b table-cell">
+            <span class="rounded-full px-3 py-1 text-xs font-semibold"
+              style="
+                background:${getStatusColor(unit.status).bg};
+                color:${getStatusColor(unit.status).color};
+                display:inline-block;
+                min-width:86px;
+                text-align:center;
+                letter-spacing:0.03em;
+                box-shadow:0 1px 3px 0 #0001;
+              "
+            >${unit.status}</span>
+          </td>
+          <td class="p-2 border-b table-cell">
+            <span class="rounded-full px-3 py-1 text-xs font-semibold"
+              style="
+                background:${getLocationColor(unit.location).bg};
+                color:${getLocationColor(unit.location).color};
+                min-width: 86px;
+                display:inline-block;
+                text-align:center;
+                letter-spacing:0.03em;
+                box-shadow:0 1px 3px 0 #0001;
+              "
+            >${unit.location}</span>
+          </td>
+          <td class="p-2 border-b table-cell text-xs text-gray-600 max-w-32 truncate" title="${(unit.notes || '').replace(/"/g, '&quot;')}">${unit.notes || '-'}</td>
+          <td class="p-2 border-b table-cell">${new Date(unit.lastAction).toLocaleString()}</td>
+          <td class="p-2 border-b text-center relative table-dot-menu">
+            <button class="px-2 py-1 text-lg font-bold" onclick="event.stopPropagation();toggleRowMenu(${idx})">⋮</button>
+            <div class="table-dot-menu-content" id="row-menu-${idx}">
+              <button onclick="openDetailsDialogSafe('${unitKey}')">Details</button>
+              <button onclick="openMoveDialogSafe('${unitKey}')">Move</button>
+              <button onclick="openStatusDialogSafe('${unitKey}')">Change Status</button>
+              <button onclick="openEditDialogSafe('${unitKey}')">Edit</button>
+              ${canDelete ? `<button class="delete" onclick='deleteUnit("${unit.chargerId}")'>Delete</button>` : ""}
+            </div>
+          </td>
           </div>
         </td>
-        </div>
-      </td>
-    </tr>`;
-  }).join("");
-  
-    // Menu logic
-    tbody.querySelectorAll('.table-dot-menu > button').forEach((btn, idx) => {
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        document.querySelectorAll('.table-dot-menu').forEach((m, j) => {
-          if (j !== idx) m.classList.remove('show');
-        });
-        btn.parentNode.classList.toggle('show');
-        // Close on outside click
-        document.addEventListener('click', function closeMenu(ev) {
-          if (!btn.parentNode.contains(ev.target)) {
-            btn.parentNode.classList.remove('show');
-            document.removeEventListener('click', closeMenu);
-          }
-        });
-      };
-    });
-  
-    // Checkbox logic (row)
-    tbody.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-      cb.onchange = (e) => {
-        const chargerId = e.target.dataset.chargerid;
-        if (e.target.checked) {
-          if (!window.selectedUnits.includes(chargerId)) {
-            window.selectedUnits.push(chargerId);
-          }
-        } else {
-          window.selectedUnits = window.selectedUnits.filter(id => id !== chargerId);
-        }
-        renderBulkActionBar();
-        cb.closest('tr').classList.toggle('selected', cb.checked);
-      };
-    });
-  
-    // Select All logic (only for visible page)
-    const selectAll = main.querySelector('#selectAll');
-if (selectAll) {
-  const allPageItemsSelected = paginated.length > 0 && paginated.every(unit => window.selectedUnits.includes(unit.chargerId));
-  
-  selectAll.checked = allPageItemsSelected;
-  selectAll.indeterminate = !allPageItemsSelected && paginated.some(unit => window.selectedUnits.includes(unit.chargerId));
-  
-  selectAll.onchange = (e) => {
-    if (e.target.checked) {
-      paginated.forEach(unit => {
-        if (!window.selectedUnits.includes(unit.chargerId)) {
-          window.selectedUnits.push(unit.chargerId);
-        }
-      });
-    } else {
-      window.selectedUnits = [];
-    }
-    renderTableRows(); // re-render to update checked
-    renderBulkActionBar();
-  };
-}
-  
-    // Pagination controls
-    const paginationBar = main.querySelector('#paginationBar');
-    const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
-    const startRecord = Math.min(startIdx + 1, filtered.length);
-    const endRecord = Math.min(endIdx, filtered.length);
+      </tr>`;
+    }).join("");
     
-    paginationBar.innerHTML = `
-  <div class="flex flex-col items-center gap-3 py-4">
-    <div class="flex flex-col sm:flex-row items-center gap-4">
-      <div class="flex items-center gap-2">
-        <button id="prevPageBtn" class="px-4 py-1 rounded bg-purple-600 text-white font-semibold hover:bg-purple-700 transition ${page === 1 ? 'opacity-50 cursor-not-allowed' : ''}" ${page === 1 ? 'disabled' : ''}>Prev</button>
-        <span id="pageNumSpan" class="font-semibold">Page ${page} of ${pageCount}</span>
-        <button id="nextPageBtn" class="px-4 py-1 rounded bg-purple-600 text-white font-semibold hover:bg-purple-700 transition ${page === pageCount ? 'opacity-50 cursor-not-allowed' : ''}" ${page === pageCount ? 'disabled' : ''}>Next</button>
+      // Menu logic
+      tbody.querySelectorAll('.table-dot-menu > button').forEach((btn, idx) => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          document.querySelectorAll('.table-dot-menu').forEach((m, j) => {
+            if (j !== idx) m.classList.remove('show');
+          });
+          btn.parentNode.classList.toggle('show');
+          // Close on outside click
+          document.addEventListener('click', function closeMenu(ev) {
+            if (!btn.parentNode.contains(ev.target)) {
+              btn.parentNode.classList.remove('show');
+              document.removeEventListener('click', closeMenu);
+            }
+          });
+        };
+      });
+    
+      // Checkbox logic (row)
+      tbody.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.onchange = (e) => {
+          const chargerId = e.target.dataset.chargerid;
+          if (e.target.checked) {
+            if (!window.selectedUnits.includes(chargerId)) {
+              window.selectedUnits.push(chargerId);
+            }
+          } else {
+            window.selectedUnits = window.selectedUnits.filter(id => id !== chargerId);
+          }
+          renderBulkActionBar();
+          cb.closest('tr').classList.toggle('selected', cb.checked);
+        };
+      });
+    
+      // Select All logic (only for visible page)
+      const selectAll = main.querySelector('#selectAll');
+  if (selectAll) {
+    const allPageItemsSelected = paginated.length > 0 && paginated.every(unit => window.selectedUnits.includes(unit.chargerId));
+    
+    selectAll.checked = allPageItemsSelected;
+    selectAll.indeterminate = !allPageItemsSelected && paginated.some(unit => window.selectedUnits.includes(unit.chargerId));
+    
+    selectAll.onchange = (e) => {
+      if (e.target.checked) {
+        paginated.forEach(unit => {
+          if (!window.selectedUnits.includes(unit.chargerId)) {
+            window.selectedUnits.push(unit.chargerId);
+          }
+        });
+      } else {
+        window.selectedUnits = [];
+      }
+      renderTableRows(); // re-render to update checked
+      renderBulkActionBar();
+    };
+  }
+    
+      // Pagination controls
+      const paginationBar = main.querySelector('#paginationBar');
+      const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+      const startRecord = Math.min(startIdx + 1, filtered.length);
+      const endRecord = Math.min(endIdx, filtered.length);
+      
+      paginationBar.innerHTML = `
+    <div class="flex flex-col items-center gap-3 py-4">
+      <div class="flex flex-col sm:flex-row items-center gap-4">
+        <div class="flex items-center gap-2">
+          <button id="prevPageBtn" class="px-4 py-1 rounded bg-purple-600 text-white font-semibold hover:bg-purple-700 transition ${page === 1 ? 'opacity-50 cursor-not-allowed' : ''}" ${page === 1 ? 'disabled' : ''}>Prev</button>
+          <span id="pageNumSpan" class="font-semibold">Page ${page} of ${pageCount}</span>
+          <button id="nextPageBtn" class="px-4 py-1 rounded bg-purple-600 text-white font-semibold hover:bg-purple-700 transition ${page === pageCount ? 'opacity-50 cursor-not-allowed' : ''}" ${page === pageCount ? 'disabled' : ''}>Next</button>
+        </div>
+        <label class="flex items-center gap-1 text-sm">
+          Show
+          <select id="pageSizeSelect" class="border px-2 py-1 rounded">
+            <option value="30" ${pageSize === 30 ? 'selected' : ''}>30</option>
+            <option value="50" ${pageSize === 50 ? 'selected' : ''}>50</option>
+            <option value="100" ${pageSize === 100 ? 'selected' : ''}>100</option>
+          </select>
+          entries per page
+        </label>
       </div>
-      <label class="flex items-center gap-1 text-sm">
-        Show
-        <select id="pageSizeSelect" class="border px-2 py-1 rounded">
-          <option value="30" ${pageSize === 30 ? 'selected' : ''}>30</option>
-          <option value="50" ${pageSize === 50 ? 'selected' : ''}>50</option>
-          <option value="100" ${pageSize === 100 ? 'selected' : ''}>100</option>
-        </select>
-        entries per page
-      </label>
+      <div class="text-sm text-gray-600 dark:text-gray-400 text-center">
+        Showing ${startRecord} to ${endRecord} of ${filtered.length} entries
+        ${filtered.length !== window.inventory.length ? ` (filtered from ${window.inventory.length} total)` : ''}
+        ${window.inventorySorting.column ? ` • Sorted by ${window.inventorySorting.column} (${window.inventorySorting.direction === 'asc' ? 'A-Z' : 'Z-A'})` : ''}
+      </div>
     </div>
-    <div class="text-sm text-gray-600 dark:text-gray-400 text-center">
-      Showing ${startRecord} to ${endRecord} of ${filtered.length} entries
-      ${filtered.length !== window.inventory.length ? ` (filtered from ${window.inventory.length} total)` : ''}
-    </div>
-  </div>
-`;
-  
-    // Pagination event handlers
-    main.querySelector('#prevPageBtn').onclick = () => {
-      if (window.inventoryPage > 1) {
-        window.inventoryPage--;
+  `;
+    
+      // Pagination event handlers
+      main.querySelector('#prevPageBtn').onclick = () => {
+        if (window.inventoryPage > 1) {
+          window.inventoryPage--;
+          renderTableRows();
+        }
+      };
+      main.querySelector('#nextPageBtn').onclick = () => {
+        if (window.inventoryPage < pageCount) {
+          window.inventoryPage++;
+          renderTableRows();
+        }
+      };
+      main.querySelector('#pageSizeSelect').onchange = (e) => {
+        window.inventoryPageSize = parseInt(e.target.value, 10);
+        window.inventoryPage = 1;
         renderTableRows();
-      }
-    };
-    main.querySelector('#nextPageBtn').onclick = () => {
-      if (window.inventoryPage < pageCount) {
-        window.inventoryPage++;
-        renderTableRows();
-      }
-    };
-    main.querySelector('#pageSizeSelect').onchange = (e) => {
-      window.inventoryPageSize = parseInt(e.target.value, 10);
-      window.inventoryPage = 1;
-      renderTableRows();
-    };
-  
-    renderBulkActionBar();
+      };
+    
+      renderBulkActionBar();
   }
 
   window.openDetailsDialogSafe = function(unitKey) {
@@ -1436,7 +1745,9 @@ if (selectAll) {
 
 function renderInventoryMobile(main, items) {
   ensureDialogs();
-  main.innerHTML = `
+  const userRole = getCurrentUserRole();
+
+    main.innerHTML = `
     <div class="sticky top-0 z-20 bg-white dark:bg-gray-900 p-3 flex gap-2 items-center shadow">
       <input id="searchInput" type="text" placeholder="Search anything..." class="flex-1 border rounded px-3 py-2 bg-gray-50 dark:bg-gray-800" />
       <button id="scanBtn" class="bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center" title="Scan Barcode">
@@ -1448,12 +1759,14 @@ function renderInventoryMobile(main, items) {
       </button>
     </div>
     <div id="mobileInventoryList" class="flex flex-col gap-3 mt-3 px-3 pb-32"></div>
-    <button id="fabAdd" class="fixed bottom-24 right-6 bg-purple-600 text-white rounded-full w-16 h-16 flex items-center justify-center shadow-lg text-3xl z-50">
-      <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="10" stroke="white"/>
-        <path d="M12 8v8m4-4H8" stroke="white"/>
-      </svg>
-    </button>
+    ${userRole !== 'Agent' ? `
+      <button id="fabAdd" class="fixed bottom-24 right-6 bg-purple-600 text-white rounded-full w-16 h-16 flex items-center justify-center shadow-lg text-3xl z-50">
+        <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" stroke="white"/>
+          <path d="M12 8v8m4-4H8" stroke="white"/>
+        </svg>
+      </button>
+    ` : ''}
   `;
 
   // Ensure all dialogs exist after clearing main content
@@ -1538,17 +1851,19 @@ function renderInventoryMobile(main, items) {
   };
 
   // FAB add logic with permission check
-  main.querySelector('#fabAdd').onclick = async () => {
-    if (await canManageInventory()) {
-      if (typeof showAddItemDialog === 'function') {
-        showAddItemDialog();
+  if (userRole !== 'Agent') {
+    main.querySelector('#fabAdd')?.addEventListener('click', async () => {
+      if (await canManageInventory()) {
+        if (typeof openAddDialog === 'function') {
+          openAddDialog();
+        } else {
+          showToast('Add dialog not available', 'red');
+        }
       } else {
-        showToast("Add function not available", "red");
+        showToast('You do not have permission to add items', 'red');
       }
-    } else {
-      showToast("You don't have permission to add inventory", "red");
-    }
-  };
+    });
+  }
 }
 
   // Replace the openMobileSearchDialog function (around line 1600)
@@ -1985,6 +2300,7 @@ async function renderBulkActionBar() {
   // Check permissions for CRUD operations
   const canManage = await canManageInventory();
   const canDelete = await canDeleteItems();
+  const userRole = await getCurrentUserRole();
   
   if (!canManage) {
     bar.innerHTML = `
@@ -2001,7 +2317,7 @@ async function renderBulkActionBar() {
       <span class="font-semibold">${window.selectedUnits.length} selected</span>
       <button onclick="openBulkMoveDialog()" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded">Bulk Move</button>
       <button onclick="openBulkStatusDialog()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded">Bulk Status</button>
-      ${canDelete ? `<button onclick="bulkDelete()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Bulk Delete</button>` : ""}
+      ${canDelete && userRole !== 'Agent' ? `<button onclick="bulkDelete()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Bulk Delete</button>` : ""}
       <button onclick="clearBulkSelection()" class="ml-auto text-gray-500 hover:text-gray-900">Cancel</button>
     </div>
   `;
@@ -2016,25 +2332,54 @@ async function renderBulkActionBar() {
     const contractorLocations = (locations || []).filter(l => l.parent === "contractor");
     const installedLocations = locations.filter(l => l.parent === "customer" || l.parent === "public").map(l => l.name);
     const currentLocation = selected[0]?.location;
+    const currentLocationObj = locations.find(l => l.name === currentLocation);
+    const currentParent = currentLocationObj?.parent;
+
     let options = "";
-  
-    if (
-      isStorage(currentLocation) ||
-      installedLocations.includes(currentLocation)
-    ) {
-      options = (contractorLocations || []).map(l =>
+    
+    if (currentParent === "warehouse") {
+      // From warehouse: can go to other warehouses or contractors
+      const warehouseLocations = locations.filter(l => 
+        l.parent === "warehouse" && l.name !== currentLocation
+      );
+      
+      options = warehouseLocations.map(l =>
+        `<option value="${l.name}">${l.name} (Warehouse)</option>`
+      ).join("");
+      
+      options += contractorLocations.map(l =>
         `<option value="${l.name}">${l.name}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
       ).join("");
-    } else if ((contractorLocations || []).map(l => l.name).includes(currentLocation)) {
-      options = (locations || [])
-        .filter(l => l.name !== currentLocation)
-        .map(l =>
-          `<option value="${l.name}">${l.name}${l.parent && !l.isContractor ? ` (${l.parent})` : ""}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
-        ).join("");
+      
+    } else if (currentParent === "contractor") {
+      // From contractor: can go to warehouses or installed locations
+      const warehouseLocations = locations.filter(l => l.parent === "warehouse");
+      const installedLocations = locations.filter(l => l.parent === "customer" || l.parent === "public");
+      
+      options = warehouseLocations.map(l =>
+        `<option value="${l.name}">${l.name} (Warehouse)</option>`
+      ).join("");
+      
+      options += installedLocations.map(l =>
+        `<option value="${l.name}">${l.name} (${l.parent === "customer" ? "Customer" : "Public"})</option>`
+      ).join("");
+      
+    } else if (currentParent === "customer" || currentParent === "public") {
+      // From installed: can only go to contractors first
+      options = contractorLocations.map(l =>
+        `<option value="${l.name}">${l.name}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
+      ).join("");
+      
     } else {
-      options = (contractorLocations || []).map(l =>
-        `<option value="${l.name}">${l.name}${l.isContractor ? ` (${l.company}, ${l.phone})` : ""}</option>`
-      ).join("");
+      // Default case - show all available locations except current
+      options = locations
+        .filter(l => l.name !== currentLocation)
+        .map(l => {
+          const parentName = l.parent ? ` (${l.parent})` : "";
+          const contractorInfo = l.isContractor ? ` (${l.company}, ${l.phone})` : "";
+          return `<option value="${l.name}">${l.name}${parentName}${contractorInfo}</option>`;
+        })
+        .join("");
     }
   
     const settings = await loadSettings();
@@ -2088,45 +2433,87 @@ if (!moveLoc) {
 }
 
 // Get dynamic location types
-const contractorLocationsNames = await getContractorLocations();
-const installedLocations = await getInstalledLocations();
-const currentLocation = selected[0]?.location;
-
-// Enhanced validation with dynamic location checking
 const isFromStorage = await isStorage(currentLocation);
 const isFromInstalled = await isInstalled(currentLocation);
+const contractorLocationsNames = await getContractorLocations(); // Add this line
+const isFromContractor = contractorLocationsNames.includes(currentLocation); // Fix this line
 const isToContractor = contractorLocationsNames.includes(moveLoc);
 const isToInstalled = installedLocations.includes(moveLoc);
+const isToStorage = await isStorage(moveLoc);
 
+const settings = await loadSettings();
+const contractorNames = (settings.contractors || []).map(c => c.name);
+const locationConfig = settings.locations?.find(l => l.name === moveLoc);
+const isMovingToContractor = 
+  contractorNames.includes(moveLoc) || 
+  locationConfig?.parent === "contractor";
+
+// Only restrict installed -> non-contractor movements (not warehouse movements)
 if (
-  (isFromStorage || isFromInstalled) &&
-  !isToContractor &&
-  !await haveSameParent(currentLocation, moveLoc, locations) &&
-  !(await isAdmin()) // Super admin bypass
+  isFromInstalled && 
+  !isToContractor && 
+  !isToStorage &&
+  !(await isAdmin())
 ) {
   dialog.querySelector("#formError").textContent =
-    "You can only move units from warehouse/installed to a Contractor/Technician location, unless moving within the same location group.";
+    "Items from installed locations must go through a contractor first, unless moving to warehouse storage.";
+  return;
+}
+
+// Restrict non-contractor -> installed movements
+if (
+  !isFromContractor && 
+  isToInstalled &&
+  !(await isAdmin())
+) {
+  dialog.querySelector("#formError").textContent =
+    "Items can only be installed through a contractor location first.";
   return;
 }
     
-      dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
-    
-      let items = [...window.inventory];
-      const prevStates = [];
+dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
+
+let items = [...window.inventory];
+const prevStates = [];
+      
+      // FIRST: Capture original states before making any changes
       selected.forEach(unit => {
         const idx = items.findIndex(i => i.chargerId === unit.chargerId);
         if (idx >= 0) {
-          prevStates.push({...items[idx]});
-          if (moveLoc) items[idx].location = moveLoc;
-          if (moveStatus) items[idx].status = moveStatus;
-          items[idx].lastAction = new Date().toISOString();
-          if (moveComment) items[idx].notes = moveComment;
+          prevStates.push({
+            chargerId: unit.chargerId,
+            originalLocation: items[idx].location,
+            originalStatus: items[idx].status,
+            originalAssignedDate: items[idx].assignedDate, // Capture original assigned date
+            product: items[idx].product,
+            chargerSerial: items[idx].chargerSerial,
+            simNumber: items[idx].simNumber
+          });
         }
       });
       
+    // SECOND: Update the items with assignedDate logic
+    selected.forEach(unit => {
+      const idx = items.findIndex(i => i.chargerId === unit.chargerId);
+      if (idx >= 0) {
+        if (moveLoc) items[idx].location = moveLoc;
+        if (moveStatus) items[idx].status = moveStatus;
+        items[idx].lastAction = new Date().toISOString();
+        if (moveComment) items[idx].notes = moveComment;
+        
+        // FIXED: Set assignedDate when moving to contractor
+        if (isMovingToContractor) {
+          items[idx].assignedDate = new Date().toISOString();
+        }
+        // Clear assignedDate when moving away from contractor
+        else if (items[idx].assignedDate) {
+          delete items[idx].assignedDate;
+        }
+      }
+    });
+      
       // Update all items at once
       try {
-        // Update all items at once
         const updatePromises = selected.map(unit => {
           const idx = items.findIndex(i => i.chargerId === unit.chargerId);
           if (idx >= 0) {
@@ -2136,18 +2523,18 @@ if (
         
         await Promise.all(updatePromises.filter(Boolean));
         
-        // Create audit log entries
-        const newEntries = selected.map(unit => ({
+        // THIRD: Create audit log entries using the captured original states
+        const newEntries = prevStates.map(prevState => ({
           date: new Date().toISOString(),
           action: "Bulk Move",
-          chargerId: unit.chargerId,
-          chargerSerial: unit.chargerSerial || "",
-          simNumber: unit.simNumber || "",
-          product: unit.product || "",
-          from: unit.location,
-          to: moveLoc,
-          statusFrom: unit.status,
-          statusTo: moveStatus || unit.status,
+          chargerId: prevState.chargerId,
+          chargerSerial: prevState.chargerSerial || "",
+          simNumber: prevState.simNumber || "",
+          product: prevState.product || "",
+          from: prevState.originalLocation,     // Use captured original location
+          to: moveLoc,                         // Use the new location
+          statusFrom: prevState.originalStatus, // Use captured original status
+          statusTo: moveStatus || prevState.originalStatus,
           user: getCurrentUserEmail(),
           comment: moveComment
         }));
@@ -2200,6 +2587,11 @@ if (
     const statusOptions = allowedStatuses
       .filter(s => !selected.every(i => i.status === s))
       .map(s => `<option value="${s}">${s}</option>`).join("");
+
+      if (!allowedStatuses.length) {
+        showToast('No valid status options available for this location', 'red');
+        return;
+      }
   
       dialog.innerHTML = `
     <form method="dialog" class="flex flex-col gap-3 w-80">
@@ -2254,25 +2646,26 @@ if (
     dialog.querySelector('form').onsubmit = async e => {
       e.preventDefault();
     
-      const submitBtn = e.target.querySelector('button[value="ok"]');
-      if (!debounceSubmit(submitBtn)) return;
+    const submitBtn = e.target.querySelector('button[value="ok"]');
+    if (!debounceSubmit(submitBtn)) return;
 
-      // Read all form values BEFORE replacing dialog content
-      const newStatus = dialog.querySelector("#newStatus").value.trim();
-      const statusComment = dialog.querySelector("#statusComment").value.trim();
-      const privPub = dialog.querySelector("#privatePublic") ? dialog.querySelector("#privatePublic").value : "";
-      const invoice = dialog.querySelector("#invoiceNumber") ? dialog.querySelector("#invoiceNumber").value.trim() : "";
+    // Read all form values BEFORE replacing dialog content
+    const newStatus = dialog.querySelector("#newStatus").value.trim();
+    const statusComment = dialog.querySelector("#statusComment").value.trim();
+    const privPubEl = dialog.querySelector("#privatePublic"); // Fix: get element reference
+    const privPub = privPubEl ? privPubEl.value : "";
+    const invoice = dialog.querySelector("#invoiceNumber") ? dialog.querySelector("#invoiceNumber").value.trim() : "";
     
-      if (!newStatus) {
+    if (!newStatus) {
       dialog.querySelector("#newStatus").classList.add('border-red-500');
       dialog.querySelector("#formError").textContent = "Please select a status.";
       return;
     }
 
-    if (newStatus === "Installed" && !privPub) {
-    if (privPubEl) privPubEl.classList.add('border-red-500');
-    dialog.querySelector("#formError").textContent = "Please select Private or Public for installed status.";
-    return;
+    if (newStatus === "Installed" && privPubEl && !privPub) {
+      privPubEl.classList.add('border-red-500');
+      dialog.querySelector("#formError").textContent = "Please select Private or Public for installed status.";
+      return;
     }
     
       // NOW replace dialog content with loading spinner
@@ -2283,14 +2676,23 @@ if (
       selected.forEach(unit => {
         const idx = items.findIndex(i => i.chargerId === unit.chargerId);
         if (idx >= 0) {
-          prevStates.push({...items[idx]});
-          items[idx].status = newStatus;
-          items[idx].lastAction = new Date().toISOString();
-          if (newStatus === "Installed") {
-            // Don't automatically set location - let user choose through move dialog
-            items[idx].isAsset = privPub === "Public";
-            items[idx].invoiceNumber = privPub === "Private" ? invoice : "";
+          if (newStatus === 'Reserved' && !items[idx].assignedDate) {
+            items[idx].assignedDate = new Date().toISOString();
           }
+          else if (items[idx].status === 'Reserved' && newStatus !== 'Reserved') {
+            // Only clear if not with a contractor
+            const settings = loadSettings(); // Remove await here since we're in forEach
+            const contractorNames = (settings.contractors || []).map(c => c.name);
+            const locationConfig = settings.locations?.find(l => l.name === items[idx].location);
+            const isWithContractor = 
+              contractorNames.includes(items[idx].location) || 
+              locationConfig?.parent === "contractor";
+            
+            if (!isWithContractor) {
+              delete items[idx].assignedDate;
+            }
+          }
+          
           if (statusComment) items[idx].notes = statusComment;
         }
       });
@@ -2299,6 +2701,20 @@ if (
       for (const unit of selected) {
         const idx = items.findIndex(i => i.chargerId === unit.chargerId);
         if (idx >= 0) {
+          items[idx].status = newStatus;
+          items[idx].lastAction = new Date().toISOString();
+          
+          if (newStatus === "Installed") {
+            items[idx].isAsset = privPub === "Public";
+            items[idx].invoiceNumber = privPub === "Private" ? invoice : "";
+          }
+          
+          // ADD: Set assignedDate when status becomes Reserved
+          if (newStatus === 'Reserved' && !items[idx].assignedDate) {
+            items[idx].assignedDate = new Date().toISOString();
+          }
+          
+          if (statusComment) items[idx].notes = statusComment;
           await updateSingleItem(items[idx]);
         }
       }
@@ -2347,15 +2763,6 @@ if (
       renderInventoryTable(document.getElementById('main-content'));
     };
   };   
-
-  function restoreItems(current, prevStates) {
-    // Returns a new array with previous states restored for affected items
-    const ids = prevStates.map(i => i.chargerId);
-    return current.map(i => {
-      const prev = prevStates.find(p => p.chargerId === i.chargerId);
-      return prev ? prev : i;
-    });
-  }
   
   // showUndoToast(message, color, undoCallback)
   function showUndoToast(message, color, undoCallback) {
@@ -2453,17 +2860,10 @@ window.toggleActionsMenu = function(idx) {
       dialog.close();
     };
   };
-
-  async function haveSameParent(locA, locB, locations) {
-    if (!locA || !locB || !locations) return false;
-    const a = locations.find(l => l.name === locA);
-    const b = locations.find(l => l.name === locB);
-    return a && b && a.parent && b.parent && a.parent === b.parent;
-  }
   
   window.openMoveDialog = async function(unit) {
-    if (!(await canManageInventory())) {
-      showToast("You don't have permission to move inventory", "red");
+    if (!(await canMoveInventory())) {
+      showToast("You don't have permission to move items", "red");
       return;
     }
     const dialog = document.getElementById('actionDialog');
@@ -2559,13 +2959,14 @@ if (currentParent === "warehouse") {
   
     dialog.querySelector('form').onsubmit = async e => {
       e.preventDefault();
-
       const submitBtn = e.target.querySelector('button[value="ok"]');
       if (!debounceSubmit(submitBtn)) return;
+  
+      const moveLoc = dialog.querySelector("#moveLoc").value.trim();
+      const moveStatus = dialog.querySelector("#moveStatus").value.trim();
+      const moveComment = dialog.querySelector("#moveComment").value.trim();
 
-const moveLoc = dialog.querySelector("#moveLoc").value.trim();
-const moveStatus = dialog.querySelector("#moveStatus").value.trim();
-const moveComment = dialog.querySelector("#moveComment").value.trim();
+      
 
 // Get dynamic location data
 const contractorLocationsNames = await getContractorLocations();
@@ -2574,50 +2975,69 @@ const fromLoc = unit.location;
 const toLoc = moveLoc;
 
 // Dynamic validation using settings-based location types
+// Dynamic validation using settings-based location types
 const isFromInstalled = await isInstalled(fromLoc);
 const isToInstalled = await isInstalled(toLoc);
 const isFromContractor = contractorLocationsNames.includes(fromLoc);
 const isToContractor = contractorLocationsNames.includes(toLoc);
+const isToStorage = await isStorage(toLoc);
 
-// Enforce workflow: must go through contractor when moving to or from installed locations
-if (isToInstalled && !isFromContractor) {
+const settings = await loadSettings();
+const contractorNames = (settings.contractors || []).map(c => c.name);
+const locationConfig = settings.locations?.find(l => l.name === moveLoc);
+const isMovingToContractor = 
+  contractorNames.includes(moveLoc) || 
+  locationConfig?.parent === "contractor";
+
+// Only enforce contractor workflow for installed locations, not warehouses
+if (isToInstalled && !isFromContractor && !isToStorage) {
   showToast("To move a unit to an installed location, it must first go through a contractor/technician.", "red");
   return;
 }
-if (isFromInstalled && !isToContractor) {
-  showToast("To move a unit out of an installed location, it must first go through a contractor/technician.", "red");
+if (isFromInstalled && !isToContractor && !isToStorage) {
+  showToast("To move a unit out of an installed location, it must first go through a contractor/technician or to warehouse storage.", "red");
   return;
 }
     
-      // ...existing validation and move logic...
-      dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
+dialog.innerHTML = `<div class="flex items-center justify-center h-32"><div class="loader"></div>Saving...</div>`;
 
-      let items = [...window.inventory];
-      const idx = items.findIndex(i => i.chargerId === unit.chargerId);
-      if (idx >= 0) {
-        if (moveLoc) { // Only update if a new location is selected
-          items[idx].location = moveLoc;
-        }
-        if (moveStatus) items[idx].status = moveStatus;
-        items[idx].lastAction = new Date().toISOString();
-        items[idx].notes = moveComment;
+let items = [...window.inventory];
+const idx = items.findIndex(i => i.chargerId === unit.chargerId);
+if (idx >= 0) {
+  const originalLocation = items[idx].location;
+  const originalStatus = items[idx].status;
+
+  if (moveLoc) items[idx].location = moveLoc;
+  if (moveStatus) items[idx].status = moveStatus;
+  items[idx].lastAction = new Date().toISOString();
+  items[idx].notes = moveComment;
+  
+  // FIXED: Set assignedDate when moving to contractor
+  if (isMovingToContractor) {
+    items[idx].assignedDate = new Date().toISOString();
+  }
+  // Clear assignedDate when moving away from contractor
+  else if (items[idx].assignedDate) {
+    delete items[idx].assignedDate;
+  }
+
+  await updateSingleItem(items[idx]);
+      
+        await saveAuditLog([{
+          date: new Date().toISOString(),
+          action: "Move",
+          chargerId: unit.chargerId,
+          chargerSerial: unit.chargerSerial,
+          simNumber: unit.simNumber,
+          product: unit.product,
+          from: originalLocation, // <-- Use original value
+          to: moveLoc || originalLocation,
+          statusFrom: originalStatus,
+          statusTo: moveStatus || originalStatus,
+          user: getCurrentUserEmail(),
+          comment: moveComment
+        }]);
       }
-      await updateSingleItem(items[idx]);
-    
-      await saveAuditLog([{
-        date: new Date().toISOString(),
-        action: "Move",
-        chargerId: unit.chargerId,
-        chargerSerial: unit.chargerSerial,
-        simNumber: unit.simNumber,
-        product: unit.product,
-        from: unit.location,
-        to: moveLoc || unit.location, // Show correct "to" in audit log
-        statusFrom: unit.status,
-        statusTo: moveStatus || unit.status,
-        user: getCurrentUserEmail(),
-        comment: moveComment
-      }]);
 
       showToast("Unit moved", "blue");
   dialog.close();
@@ -2625,50 +3045,6 @@ if (isFromInstalled && !isToContractor) {
   renderInventoryTable(document.getElementById('main-content'));
 };
   };
-
-
-
-  // Helper functions for hierarchy logic
-  async function isStorage(location) {
-    if (!location) return false;
-    const settings = await loadSettings();
-    const allLocations = await getAllLocationsWithContractors();
-    const locationObj = allLocations.find(l => l.name === location);
-    return locationObj?.parent === "warehouse";
-  }
-  
-  async function isInstalled(location) {
-    if (!location) return false;
-    const allLocations = await getAllLocationsWithContractors();
-    const locationObj = allLocations.find(l => l.name === location);
-    return locationObj?.parent === "customer" || locationObj?.parent === "public";
-  }
-  
-  // Add this helper function to get installed locations dynamically
-  async function getInstalledLocations() {
-    const allLocations = await getAllLocationsWithContractors();
-    return allLocations
-      .filter(l => l.parent === "customer" || l.parent === "public")
-      .map(l => l.name);
-  }
-  
-  // Add this helper function to get contractor locations dynamically  
-  async function getContractorLocations() {
-    const allLocations = await getAllLocationsWithContractors();
-    return allLocations
-      .filter(l => l.parent === "contractor")
-      .map(l => l.name);
-  }
-  
-  async function getContractorContactInfo(locationName) {
-    // Try to match the name within the contractor's assigned location string
-    const settings = await loadSettings();
-    if (!settings.contractors) return "";
-    const contractor = settings.contractors.find(
-      c => locationName.toLowerCase().includes(c.name.toLowerCase())
-    );
-    return contractor ? ` (${contractor.phone})` : "";
-  }
   
   // 2. Assign Contractor Dialog: Use real contractor list from settings and store contractorId
   window.openAssignContractorDialog = async function(unit) {
@@ -3463,6 +3839,51 @@ export async function updateUnitsLocation(unitIds, newLocation) {
   }
 }
 
+window.migrateAssignedDates = async function() {
+  console.log('Starting migration of assigned dates...');
+  
+  try {
+    const settings = await loadSettings();
+    const contractorNames = (settings.contractors || []).map(c => c.name);
+    
+    let updateCount = 0;
+    
+    for (const item of window.inventory) {
+      // Check if item is with contractor but missing assignedDate
+      const location = settings.locations?.find(loc => loc.name === item.location);
+      const isWithContractor = 
+        contractorNames.includes(item.location) || 
+        location?.parent === "contractor" ||
+        item.status === 'Reserved';
+      
+      if (isWithContractor && !item.assignedDate) {
+        // Use lastAction as the assigned date for existing items
+        item.assignedDate = item.lastAction || new Date().toISOString();
+        await updateSingleItem(item);
+        updateCount++;
+        console.log(`Updated ${item.chargerId} with assignedDate: ${item.assignedDate}`);
+        
+        // Add small delay to avoid overwhelming Firebase
+        if (updateCount % 10 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+    }
+    
+    console.log(`Migration complete. Updated ${updateCount} items.`);
+    showToast(`Migration complete. Updated ${updateCount} items with assigned dates.`, 'green');
+    
+    // Refresh the inventory display
+    await loadInventory();
+    renderInventoryTable(document.getElementById('main-content'));
+    
+  } catch (error) {
+    console.error('Migration failed:', error);
+    showToast('Migration failed: ' + error.message, 'red');
+  }
+};
+
+
 window.openDetailsDialog = openDetailsDialog;
 window.toggleActionsMenu = toggleActionsMenu;
 window.bulkDelete = bulkDelete;
@@ -3481,6 +3902,7 @@ window.performGlobalSearch = performGlobalSearch;
 window.openGlobalSearchDialog = openGlobalSearchDialog;
 window.openMobileSearchDialog = openMobileSearchDialog;
 window.openAssignContractorDialog = openAssignContractorDialog;
+
 window.downloadInventoryCSV = function() {
   console.log('downloadInventoryCSV called');
   try {
