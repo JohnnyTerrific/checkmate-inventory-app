@@ -1,4 +1,4 @@
-import { showToast } from './core.js';
+import { showToast, showToastWithAction } from './core.js';
 import { loadInventory, saveInventory } from './inventory.js';
 import { getCurrentUserEmail } from './utils/users.js';
 
@@ -73,9 +73,9 @@ export async function getArrivingShipments() {
     const today = new Date();
     today.setHours(23, 59, 59, 999);
     
-    // Use window.db consistently
     const snapshot = await window.db.collection('shipments')
       .where('arrived', '==', false)
+      .where('acknowledged', '==', false)
       .get();
     
     const allPending = snapshot.docs.map(doc => ({
@@ -86,13 +86,44 @@ export async function getArrivingShipments() {
     const arriving = allPending.filter(shipment => {
       if (!shipment.eta) return false;
       const etaDate = new Date(shipment.eta);
-      return etaDate <= today;
+      return etaDate <= today; // This line was incomplete in your code
     });
     
     return arriving;
   } catch (error) {
     console.error('Error getting arriving shipments:', error);
     return [];
+  }
+}
+
+export async function acknowledgeArrivedShipments() {
+  try {
+    const today = new Date();
+    const arrivedShipments = await getArrivingShipments();
+
+    if (arrivedShipments.length === 0) return;
+
+    // Mark shipments as acknowledged
+    const batch = window.db.batch();
+    arrivedShipments.forEach(shipment => {
+      const docRef = window.db.collection("shipments").doc(shipment.id);
+      batch.update(docRef, {
+        acknowledged: true,
+        acknowledgedDate: new Date().toISOString(),
+        acknowledgedBy: getCurrentUserEmail() || 'unknown_user'
+      });
+    });
+
+    await batch.commit();
+    
+    showToast(`Acknowledged ${arrivedShipments.length} arrived shipment(s)`, 'green');
+    
+    // Clear the cached arriving shipments
+    window._arrivingShipments = [];
+    
+  } catch (error) {
+    console.error('Failed to acknowledge shipments:', error);
+    showToast('Failed to acknowledge shipments: ' + error.message, 'red');
   }
 }
 
@@ -523,29 +554,74 @@ export async function checkForArrivingShipments() {
   try {
     const arrivingShipments = await getArrivingShipments();
     
-    // FIXED: Always clear cached shipments first
     window._arrivingShipments = [];
     
-    // Only show notification if there are actually arriving shipments
     if (arrivingShipments && arrivingShipments.length > 0) {
       const message = `${arrivingShipments.length} shipment(s) have arrived or are overdue!`;
-      showToast(message, 'orange');
+      
+      // Use the correct format for showToastWithAction - array of action objects
+      if (typeof showToastWithAction === 'function') {
+        showToastWithAction(
+          message,
+          'orange',
+          [
+            {
+              text: 'Acknowledge',
+              action: () => {
+                acknowledgeArrivedShipments();
+              }
+            }
+          ]
+        );
+      } else {
+        showToast(message, 'orange');
+      }
+      
       window._arrivingShipments = arrivingShipments;
       console.log('Arriving shipments detected:', arrivingShipments.length);
     } else {
-      // FIXED: Explicitly log when no shipments found
       console.log('No arriving shipments found, clearing notifications');
     }
   } catch (error) {
     console.error('Error checking for arriving shipments:', error);
-    // Clear stored shipments on error
     window._arrivingShipments = [];
   }
 }
 
-export function clearShipmentNotifications() {
-  window._arrivingShipments = [];
-  console.log('Shipment notifications cleared');
+export async function migrateOldOverdueShipments() {
+  try {
+    const today = new Date();
+    const snapshot = await window.db.collection("shipments").get();
+    const batch = window.db.batch();
+    let updateCount = 0;
+
+    snapshot.docs.forEach(doc => {
+      const shipment = doc.data();
+      if (!shipment.eta) return;
+      
+      const etaDate = new Date(shipment.eta);
+      
+      // If shipment is overdue and doesn't have acknowledged field, mark as acknowledged
+      if (etaDate <= today && !shipment.arrived && shipment.acknowledged === undefined) {
+        batch.update(doc.ref, {
+          acknowledged: true,
+          acknowledgedDate: new Date().toISOString(),
+          acknowledgedBy: 'system_migration'
+        });
+        updateCount++;
+      }
+    });
+
+    if (updateCount > 0) {
+      await batch.commit();
+      console.log(`Migrated ${updateCount} old overdue shipments`);
+      showToast(`Migrated ${updateCount} old overdue shipments`, 'green');
+    }
+    
+  } catch (error) {
+    console.error('Migration failed:', error);
+    showToast('Migration failed: ' + error.message, 'red');
+  }
 }
 
 function initializeShipmentNotifications() {
@@ -577,3 +653,6 @@ if (typeof window !== 'undefined') {
     setTimeout(initializeShipmentNotifications, 1000);
   }
 }
+
+window.acknowledgeArrivedShipments = acknowledgeArrivedShipments;
+window.migrateOldOverdueShipments = migrateOldOverdueShipments;
