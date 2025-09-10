@@ -415,7 +415,10 @@ const locationColors = {
   "Customer": { bg: "#fef9c3", color: "#92400e" },
   "Public": { bg: "#fce7f3", color: "#8b5cf6" },
   "Demo Site": { bg: "#e0f2fe", color: "#0369a1" },
-  "Service Center": { bg: "#fef3c7", color: "#d97706" }
+  "Service Center": { bg: "#fef3c7", color: "#d97706" },
+  "Installed (Wevo)": { bg: "#e1ffe6", color: "#1b5e20" },
+  "Installed (Retail)": { bg: "#e1ffe6", color: "#1b5e20" },
+  "Installed": { bg: "#e1ffe6", color: "#1b5e20" }
 };
 
 function getLocationColor(location) {
