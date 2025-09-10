@@ -469,7 +469,9 @@ const statusColors = {
   "Unknown": { bg: "#ffe0b2", color: "#ef6c00" },
   "Shipped": { bg: "#e8f5e8", color: "#2e7d32" },
   "Returned": { bg: "#fff3e0", color: "#f57c00" },
-  "Testing": { bg: "#f3e5f5", color: "#7b1fa2" }
+  "Testing": { bg: "#f3e5f5", color: "#7b1fa2" },
+  "In Service": { bg: "#00DE99", color: "#e0fff5" },
+  "Warranty Expired": { bg: "#DA0000", color: "#000000" }
 };
 
 function getStatusColor(status) {
