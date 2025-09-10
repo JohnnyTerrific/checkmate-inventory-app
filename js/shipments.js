@@ -1,6 +1,7 @@
 import { showToast, showToastWithAction } from './core.js';
 import { loadInventory, saveInventory } from './inventory.js';
 import { getCurrentUserEmail } from './utils/users.js';
+import { loadSettings } from './settings.js';
 
 // Firestore Operations
 export async function loadShipments() {
@@ -42,8 +43,7 @@ export async function saveShipment(shipmentData) {
 
 export async function updateShipment(shipmentId, updates) {
   try {
-    const shipmentRef = doc(db, 'shipments', shipmentId);
-    await updateDoc(shipmentRef, {
+    await window.db.collection('shipments').doc(shipmentId).update({
       ...updates,
       lastUpdated: new Date().toISOString()
     });
@@ -57,8 +57,7 @@ export async function updateShipment(shipmentId, updates) {
 
 export async function deleteShipment(shipmentId) {
   try {
-    const shipmentRef = doc(db, 'shipments', shipmentId);
-    await deleteDoc(shipmentRef);
+    await window.db.collection('shipments').doc(shipmentId).delete();
     
     console.log('Shipment deleted:', shipmentId);
   } catch (error) {
@@ -130,8 +129,7 @@ export async function acknowledgeArrivedShipments() {
 // Mark shipment as arrived
 export async function markShipmentArrived(shipmentId) {
   try {
-    const shipmentRef = doc(db, 'shipments', shipmentId);
-    await updateDoc(shipmentRef, {
+    await window.db.collection('shipments').doc(shipmentId).update({
       arrived: true,
       actualArrivalDate: new Date().toISOString(),
       lastUpdated: new Date().toISOString(),
@@ -185,44 +183,23 @@ export async function updateShipmentMilestone(shipmentId, milestoneIndex, comple
   }
 }
 
-// Load settings from Firestore
-async function loadSettings() {
-  try {
-    const settingsRef = collection(db, 'appdata');
-    const q = query(settingsRef, where('__name__', '==', 'settings'));
-    const snapshot = await getDocs(q);
-    
-    if (!snapshot.empty) {
-      return snapshot.docs[0].data();
-    }
-    
-    // Return defaults if no settings found
-    return {
-      vendors: ["Teison", "ABL", "EnelX", "Vestel"],
-      statuses: ["In Stock", "Installed", "Faulty", "RMA", "Reserved"]
-    };
-  } catch (error) {
-    console.error('Error loading settings:', error);
-    return {
-      vendors: ["Teison", "ABL", "EnelX", "Vestel"],
-      statuses: ["In Stock", "Installed", "Faulty", "RMA", "Reserved"]
-    };
-  }
-}
-
 // Load products from Firestore
 async function loadProducts() {
   try {
-    const productsRef = collection(db, 'Products');
-    const snapshot = await getDocs(productsRef);
+    // Use consistent v8 syntax like the rest of your app
+    const snapshot = await window.db.collection('Products').get();
     
-    return snapshot.docs.map(doc => ({
+    const products = snapshot.docs.map(doc => ({
       id: doc.id,
       name: doc.data().name || doc.data().model || doc.id,
+      model: doc.data().model || doc.data().name || doc.id,
       ...doc.data()
     }));
+    
+    console.log('Products loaded in shipments:', products);
+    return products;
   } catch (error) {
-    console.error('Error loading products:', error);
+    console.error('Error loading products in shipments:', error);
     return [];
   }
 }
@@ -250,8 +227,25 @@ export function openShipmentDialog() {
 
   // Load data and render form
   Promise.all([loadProducts(), loadSettings()])
-    .then(([products, settings]) => {
-      const vendors = settings.vendors || [];
+  .then(([products, settings]) => {
+    console.log('Shipment dialog data loaded:');
+    console.log('Products:', products);
+    console.log('Products length:', products.length);
+    console.log('Settings:', settings);
+    
+    if (!products || products.length === 0) {
+      console.error('No products loaded! Check your Products collection in Firestore');
+      dialog.innerHTML = `
+        <div class="p-6 text-center">
+          <div class="text-red-600 mb-4">No products found</div>
+          <p class="text-gray-500 mb-4">Please add products to your Products collection in Firestore first.</p>
+          <button onclick="this.closest('dialog').close()" class="bg-gray-300 px-4 py-2 rounded">Close</button>
+        </div>
+      `;
+      return;
+    }
+    
+    const vendors = settings.vendors || [];
       
       dialog.innerHTML = `
         <form method="dialog" class="flex flex-col gap-4 w-full sm:w-[40rem] max-w-3xl" style="margin:0 auto;">
@@ -339,22 +333,49 @@ export function openShipmentDialog() {
 
       // Initialize dynamic product rows
       const area = dialog.querySelector("#productsArea");
+
+      function escapeForHTML(str) {
+        if (!str) return '';
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
       
       function addProdRow(model = "", qty = "") {
+        console.log('Adding product row, available products:', products.length);
         const row = document.createElement("div");
         row.className = "flex items-center gap-2 mb-1";
+        
+        // Generate options with better error handling
+        const productOptions = products.map(p => {
+          const productName = p.name || p.model || p.id || 'Unknown Product';
+          const safeProductName = escapeForHTML(productName);
+          return `<option value="${safeProductName}">${safeProductName}</option>`;
+        }).join("");
+        
         row.innerHTML = `
           <select class="prodSel border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1 rounded flex-1" required>
             <option value="">Select Product</option>
-            ${products.map(p => `<option value="${p.name}">${p.name}</option>`).join("")}
+            ${productOptions}
           </select>
           <input class="prodQty border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1 rounded w-20" type="number" min="1" placeholder="Qty" value="${qty}" required>
           <button type="button" class="text-red-600 text-lg font-bold removeRowBtn ml-2">&times;</button>
         `;
+        
         area.appendChild(row);
         
+        // Set up event listeners
         row.querySelector(".removeRowBtn").onclick = () => row.remove();
-        row.querySelector(".prodSel").value = model;
+        
+        // Set the selected value if provided
+        if (model) {
+          const selectElement = row.querySelector(".prodSel");
+          selectElement.value = model;
+          console.log('Set product value to:', model, 'Selected:', selectElement.value);
+        }
       }
 
       dialog.querySelector("#addProdRowBtn").onclick = () => addProdRow();
